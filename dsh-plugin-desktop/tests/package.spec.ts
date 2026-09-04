@@ -250,6 +250,24 @@ describe('published package surface', () => {
     }
   })
 
+  it('patches produced files with the optional terminal-deliverable adapter', () => {
+    const patchPath = './patches/dsh-client-ui-deliverables@0.1.2-rc.1.patch'
+    expect(dshResolution('@deepseek-ai/dsh-client-ui-deliverables')).toContain(patchPath)
+    const patch = readFileSync(new URL(patchPath, workspaceRoot), 'utf8')
+    const installedClient = readFileSync(new URL(
+      'node_modules/@deepseek-ai/dsh-client-ui-deliverables/lib/client.js',
+      packageRoot,
+    ), 'utf8')
+    for (const marker of [
+      '__GS_DESKTOP_TERMINAL_DELIVERABLES__',
+      'pathsForResult(call.name, result?.content)',
+      'adapter.reconcile(produced, match.event.seq, terminalPaths)',
+    ]) {
+      expect(patch).toContain(marker)
+      expect(installedClient).toContain(marker)
+    }
+  })
+
   it('keeps wide Markdown table scrollbars visible without hover', () => {
     const patchPath = './patches/dsh-client-ui-primitives@0.1.2-rc.1.patch'
     expect(dshResolution('@deepseek-ai/dsh-client-ui-primitives')).toContain(patchPath)

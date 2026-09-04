@@ -1959,6 +1959,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@deepseek-ai/dsh-client-ui-deliverables@patch:@deepseek-ai/dsh-client-ui-deliverables@file%3Avendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-deliverables-0.1.2-rc.1.tgz#./patches/dsh-client-ui-deliverables@0.1.2-rc.1.patch::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.2-rc.1
+  resolution: "@deepseek-ai/dsh-client-ui-deliverables@patch:@deepseek-ai/dsh-client-ui-deliverables@file%3Avendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-deliverables-0.1.2-rc.1.tgz%23vendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-deliverables-0.1.2-rc.1.tgz%3A%3Ahash=8fe1c0&locator=deepseek-harness-desktop%2540workspace%253A.#./patches/dsh-client-ui-deliverables@0.1.2-rc.1.patch::version=0.1.2-rc.1&hash=25c2cc&locator=deepseek-harness-desktop%40workspace%3A."
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.2
+  checksum: 10c0/337e7bd86b44139e7ced0c19074eead384b99229d33407b5f7172f47353a6d57c2115ae9b96ffaf4e6a4e15daff93f840710e866a3a33297441e1aee5f93a544
+  languageName: node
+  linkType: hard
+
 "@deepseek-ai/dsh-client-ui-directory-picker-browse@file:vendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-directory-picker-browse-0.1.2-rc.1.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.2-rc.1
   resolution: "@deepseek-ai/dsh-client-ui-directory-picker-browse@file:vendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-directory-picker-browse-0.1.2-rc.1.tgz#vendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-directory-picker-browse-0.1.2-rc.1.tgz::hash=14367a&locator=deepseek-harness-desktop%40workspace%3A."

@@ -18,6 +18,7 @@ import { installDesktopDirectoryPickerBridge } from './directory-picker.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { installDesktopPermissionLabels } from './permission-labels.ts'
 import { installSessionLogButtonVisibility } from './session-log-button.ts'
+import { installDesktopTerminalDeliverables } from './terminal-deliverables.ts'
 import { applyExtendedShell, applyFramedShell } from './extended-shell.ts'
 import { createDesktopGsBrandApi } from './gs-brand-api.ts'
 import { installDesktopComposerActions } from './composer-actions.ts'
@@ -103,6 +104,16 @@ export {
   desktopWindowControlsPaths,
   parseDesktopWindowState,
 } from './window-controls-api.ts'
+export {
+  desktopTerminalDeliverablesAdapter,
+  installDesktopTerminalDeliverables,
+  reconcileTerminalDocxOutputs,
+  terminalDocxOutputPaths,
+} from './terminal-deliverables.ts'
+export type {
+  DesktopTerminalDeliverablesAdapter,
+  ProducedPathLike,
+} from './terminal-deliverables.ts'
 export type {
   DesktopWindowControlsApi,
   DesktopWindowState,
@@ -132,6 +143,10 @@ export const inject = [
 export function apply(ctx: ClientContext): void {
   const environment = parseDesktopClientEnvironment(window.location.search)
   if (!environment) return
+  ctx.effect(
+    installDesktopTerminalDeliverables,
+    'dsh-plugin-desktop: terminal deliverable adapter',
+  )
   // Publish the preset labels before the conversation plugin mounts; the
   // patched permission pickers read the global and fall back to their
   // English transforms when a value is absent from the map.
