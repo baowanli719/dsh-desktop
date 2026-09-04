@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { HeroBrandMarkOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SidebarBrandMarkOwnerProps } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { DESKTOP_BRAND_LOGO_DATA_URI } from './brand-logo.ts'
 import { createDesktopGsBrandApi } from './gs-brand-api.ts'
@@ -23,7 +22,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-type DesktopBrandMarkProps = HeroBrandMarkOwnerProps & SidebarBrandMarkOwnerProps
+type DesktopBrandMarkProps = SidebarBrandMarkOwnerProps & {
+  readonly size: number
+  readonly className?: string | undefined
+}
 
 /**
  * Render the desktop brand mark with the presentation requested by its host surface.

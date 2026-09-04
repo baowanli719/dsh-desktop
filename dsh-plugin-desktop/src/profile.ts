@@ -52,6 +52,10 @@ import {
 } from './desktop-network.ts'
 import type { DesktopShellMode } from './runtime.ts'
 import {
+  DESKTOP_PACKAGE_NAME,
+  DESKTOP_PACKAGE_NAMES,
+} from './product-identity.ts'
+import {
   DEFAULT_MACOS_WINDOW_MATERIAL,
   DEFAULT_WINDOWS_WINDOW_MATERIAL,
   parseMacosWindowMaterial,
@@ -75,7 +79,7 @@ import {
 export const DESKTOP_PROFILE_NAME = 'desktop'
 
 /** Standalone package name inserted through the launcher-owned desktop layer. */
-export const DESKTOP_PACKAGE_NAME = 'dsh-plugin-desktop'
+export { DESKTOP_PACKAGE_NAME } from './product-identity.ts'
 
 /** Empty include root rewritten before every profile boot. */
 export const DESKTOP_PROFILE_ROOT = 'cordis.yml'
@@ -93,7 +97,7 @@ const BROWSE_PICKER_SURFACE = '@deepseek-ai/dsh-client-ui-directory-picker-brows
 const PWSH_SANDBOX_ROW_ID = 'pwsh-sandbox'
 const UPSTREAM_PWSH_SANDBOX_PACKAGE = '@deepseek-ai/dsh-pwsh-sandbox'
 const DESKTOP_WINDOWS_PWSH_SANDBOX_ROW_ID = 'desktop-windows-pwsh-sandbox'
-const DESKTOP_WINDOWS_PWSH_SANDBOX_PACKAGE = 'dsh-plugin-desktop/windows-pwsh-sandbox'
+const DESKTOP_WINDOWS_PWSH_SANDBOX_PACKAGE = `${DESKTOP_PACKAGE_NAME}/windows-pwsh-sandbox`
 const AGENT_PRESETS_ROW_ID = 'agent-presets'
 const AGENT_PRESET_COMPOSITION_FILE = 'agent.cordis.yml'
 /** Profile-local directory holding the sanitized Desktop-owned preset root. */
@@ -111,7 +115,7 @@ export const DESKTOP_AGENT_PERSONA =
 const DEFAULT_DESKTOP_SHELL_MODE: DesktopShellMode = 'compatibility'
 const DEFAULT_DESKTOP_PORT = DESKTOP_DEFAULT_WEB_PORT
 const DESKTOP_WEB_SERVER_ROW_ID = 'desktop-webserver'
-const DESKTOP_WEB_SERVER_PACKAGE = 'dsh-plugin-desktop/webserver'
+const DESKTOP_WEB_SERVER_PACKAGE = `${DESKTOP_PACKAGE_NAME}/webserver`
 const SETTINGS_FILE_PACKAGE = '@deepseek-ai/dsh-settings-file'
 const DESKTOP_SETTINGS_NAMESPACE = 'dsh-desktop'
 const UI_LAYOUT_PACKAGE = '@deepseek-ai/dsh-client-ui-layout'
@@ -321,7 +325,7 @@ export interface SkippedOptionalEntry {
  */
 export function desktopBundleList(current: readonly string[]): string[] {
   const thirdParty = current.filter(name => !REQUIRED_BUNDLE_SET.has(name)
-    && name !== DESKTOP_PACKAGE_NAME
+    && !DESKTOP_PACKAGE_NAMES.has(name)
     && !OBSOLETE_DESKTOP_BUNDLE_SET.has(name))
   return [...REQUIRED_BUNDLES, ...thirdParty]
 }
@@ -565,7 +569,7 @@ function loadRecoveryFilteredProfile(
   }
 }
 
-/** Resolve the agent presets shipped by the matching dsh CLI dependency. */
+/** Resolve the agent presets shipped by the matching presets dependency. */
 export function shippedPresetRoot(moduleUrl: string = import.meta.url): string {
   const require = createRequire(moduleUrl)
   return unpackedAsarPath(

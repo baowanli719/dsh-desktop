@@ -24,7 +24,7 @@ const BROWSER_ACCESS = Object.freeze({
   get ordinaryBrowserEnabled() { return ordinaryBrowserEnabled },
   rendererHeader: Object.freeze({
     name: 'x-dsh-desktop-renderer',
-    value: Buffer.alloc(32, 2).toString('base64url'),
+    value: Buffer.alloc(32, 4).toString('base64url'),
   }),
   setOrdinaryBrowserEnabled(enabled) { ordinaryBrowserEnabled = enabled },
 })

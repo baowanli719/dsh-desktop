@@ -4,7 +4,12 @@ import { randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { compareSemVerVersions, parseSemVer } from './update-checker.ts'
+import {
+  compareSemVerVersions,
+  DESKTOP_RELEASE_CHANNEL_HEADER,
+  parseSemVer,
+  type DesktopReleaseChannel,
+} from './update-checker.ts'
 
 /** Desktop platforms with a fixed installer download endpoint. */
 export type DesktopDownloadPlatform = 'darwin' | 'win32'
@@ -14,6 +19,9 @@ export const DESKTOP_DOWNLOAD_URLS: Readonly<Record<DesktopDownloadPlatform, str
   darwin: 'https://www.dshdesktop.cn/api/downloads/mac',
   win32: 'https://www.dshdesktop.cn/api/downloads/windows',
 }
+
+/** Header pinning a download request and response to the checked release. */
+export const DESKTOP_TARGET_VERSION_HEADER = 'X-DSH-Desktop-Target-Version'
 
 /** Maximum accepted installer size, in bytes. */
 export const MAX_UPDATE_DOWNLOAD_BYTES = 1024 * 1024 * 1024
@@ -37,6 +45,8 @@ export interface DownloadDesktopUpdateOptions {
   readonly platform: DesktopDownloadPlatform
   /** Stable release version used to validate the selected installer. */
   readonly version: string
+  /** Release stream selected by the running Desktop flavor. */
+  readonly channel?: DesktopReleaseChannel
   /** Absolute installer path selected by the user. */
   readonly destinationPath: string
   /** Request implementation, normally backed by Electron `net.fetch`. */
@@ -103,7 +113,8 @@ const UPDATE_ARTIFACT_STATE_FILENAME = 'pending-installer.json'
  */
 export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOptions): Promise<string> {
   const platform = validatedPlatform(options.platform)
-  validatedVersion(options.version)
+  const channel = options.channel ?? 'stable'
+  validatedVersion(options.version, channel)
   const destinationPath = validatedArtifactPath(options.destinationPath, platform)
   const paths = await prepareDownloadPaths(destinationPath)
   throwIfAborted(options.signal)
@@ -112,6 +123,10 @@ export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOption
   try {
     response = await options.request(DESKTOP_DOWNLOAD_URLS[platform], {
       method: 'GET',
+      headers: {
+        [DESKTOP_RELEASE_CHANNEL_HEADER]: channel,
+        [DESKTOP_TARGET_VERSION_HEADER]: options.version,
+      },
       cache: 'no-store',
       redirect: 'follow',
       ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -128,6 +143,7 @@ export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOption
       { status: response.status },
     )
   }
+  assertReleaseResponse(response, channel, options.version)
   if (response.body === null) {
     throw new UpdateDownloadError('empty-body', 'The update download service returned an empty body.')
   }
@@ -156,12 +172,17 @@ export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOption
 }
 
 /** Fixed default filename shown by the native destination picker. */
-export function desktopUpdateFilename(platform: DesktopDownloadPlatform, version: string): string {
+export function desktopUpdateFilename(
+  platform: DesktopDownloadPlatform,
+  version: string,
+  channel: DesktopReleaseChannel = 'stable',
+): string {
   validatedPlatform(platform)
-  validatedVersion(version)
+  validatedVersion(version, channel)
   const extension = platform === 'darwin' ? 'dmg' : 'exe'
   const platformName = platform === 'darwin' ? 'mac' : 'windows'
-  return `gs-worker-${version}-${platformName}.${extension}`
+  const product = channel === 'beta' ? 'DSH-Desktop-Beta' : 'gs-worker'
+  return `${product}-${version}-${platformName}.${extension}`
 }
 
 /** Remember a downloaded installer until an upgraded application resolves its retention. */
@@ -187,7 +208,7 @@ export async function pendingDesktopUpdateArtifact(
   platform: DesktopDownloadPlatform,
 ): Promise<DesktopUpdateArtifact | undefined> {
   const statePath = artifactStatePath(validatedUserDataPath(userDataPath))
-  validatedVersion(currentVersion)
+  validatedReleaseVersion(currentVersion)
   validatedPlatform(platform)
   let value: DesktopUpdateArtifact
   try {
@@ -237,12 +258,42 @@ function validatedPlatform(platform: DesktopDownloadPlatform): DesktopDownloadPl
   return platform
 }
 
-function validatedVersion(version: string): string {
+function validatedVersion(version: string, channel: DesktopReleaseChannel = 'stable'): string {
   const parsed = parseSemVer(version)
-  if (parsed === null || parsed.prerelease.length > 0 || parsed.version !== version) {
-    throw new UpdateDownloadError('invalid-options', 'The update version must be stable Semantic Versioning.')
+  const expectedPrerelease = channel === 'stable'
+    ? parsed?.prerelease.length === 0
+    : parsed?.prerelease.length === 2
+      && parsed.prerelease[0] === 'beta'
+      && /^[0-9]+$/u.test(parsed.prerelease[1]!)
+  if (parsed === null || !expectedPrerelease || parsed.version !== version) {
+    throw new UpdateDownloadError('invalid-options', `The update version must match the ${channel} channel.`)
   }
   return version
+}
+
+function validatedReleaseVersion(version: string): string {
+  const parsed = parseSemVer(version)
+  const isStable = parsed?.prerelease.length === 0
+  const isBeta = parsed?.prerelease.length === 2
+    && parsed.prerelease[0] === 'beta'
+    && /^[0-9]+$/u.test(parsed.prerelease[1]!)
+  if (parsed === null || parsed.version !== version || (!isStable && !isBeta)) {
+    throw new UpdateDownloadError('invalid-options', 'The update version must belong to a supported release channel.')
+  }
+  return version
+}
+
+function assertReleaseResponse(
+  response: Response,
+  channel: DesktopReleaseChannel,
+  version: string,
+): void {
+  const responseChannel = response.headers.get(DESKTOP_RELEASE_CHANNEL_HEADER)
+  const responseVersion = response.headers.get(DESKTOP_TARGET_VERSION_HEADER)
+  if (channel === 'stable' && responseChannel === null && responseVersion === null) return
+  if (responseChannel !== channel || responseVersion !== version) {
+    throw new UpdateDownloadError('invalid-artifact', 'The update service returned a different release channel or version.')
+  }
 }
 
 function validatedUserDataPath(userDataPath: string): string {
@@ -304,7 +355,7 @@ async function validatedArtifactRecord(
   requireFile: boolean,
 ): Promise<DesktopUpdateArtifact> {
   const platform = validatedPlatform(artifact.platform)
-  const version = validatedVersion(artifact.version)
+  const version = validatedReleaseVersion(artifact.version)
   const path = validatedArtifactPath(artifact.path, platform)
   if (requireFile) {
     const stat = await lstat(path)

@@ -60,16 +60,20 @@ const workspaceManifest = JSON.parse(readFileSync(new URL('package.json', worksp
   scripts?: Record<string, unknown>
 }
 const ciWorkflow = readFileSync(new URL('.github/workflows/ci.yml', workspaceRoot), 'utf8')
+const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
+const runtimeVersion = '0.1.2-rc.1'
+const dshResolution = (name: string): unknown =>
+  workspaceManifest.resolutions?.[`${name}@npm:${runtimeVersion}`]
 
 describe('published package surface', () => {
   it('runs desktop and community market typechecks from the root command', () => {
     expect(workspaceManifest.scripts?.typecheck)
-      .toBe('yarn workspace dsh-plugin-desktop typecheck && yarn workspace dsh-community-market typecheck')
+      .toBe('yarn workspace dsh-plugin-desktop typecheck && yarn workspace dsh-plugin-desktop-beta typecheck && yarn workspace dsh-community-market typecheck')
   })
 
   it('runs desktop and community market tests from the root command', () => {
     expect(workspaceManifest.scripts?.test)
-      .toBe('yarn workspace dsh-plugin-desktop test && yarn workspace dsh-community-market test')
+      .toBe('yarn workspace dsh-plugin-desktop test && yarn workspace dsh-plugin-desktop-beta test && yarn workspace dsh-community-market test')
   })
 
   it('registers both npm launcher names', () => {
@@ -78,6 +82,31 @@ describe('published package surface', () => {
       'dsh-plugin-desktop': 'lib/bin.js',
       'dsh-desktop': 'lib/bin.js',
     })
+  })
+
+  it('keeps Safe Mode out of the normal DSH home and Desktop state', () => {
+    expect(main).toContain('const profileUserDataDir = safeModePaths?.userDataDir ?? desktopUserDataDir')
+    expect(main).toContain('const homeDir = safeModePaths?.homeDir ?? resolveDshHome()')
+    expect(main).toContain('if (safeModePaths !== undefined) process.env.DSH_HOME = homeDir')
+    expect(main).toContain('createDesktopWebProfile(paths.homeDir, DESKTOP_SAFE_MODE_PROFILE_NAME)')
+    expect(main).toContain("join(paths.userDataDir, 'profile-selection', 'state.json')")
+    expect(main).toContain('selectDesktopProfile(')
+    expect(main).toContain('cleanupDesktopSafeModeEnvironment(desktopUserDataDir)')
+    expect(main).toContain('if (safeModeRequested) {')
+    expect(main).toContain('const inheritedDshHome = process.env.DSH_HOME')
+    expect(main).toContain('if (process.env.DSH_HOME === safeModeHomeDir) delete process.env.DSH_HOME')
+    expect(main).toContain('if (inheritedDshHome === undefined) delete process.env.DSH_HOME')
+    expect(main).toContain('failed to remove the Safe Mode environment')
+    expect(main).toContain('desktopSafeModeRelaunchArguments()')
+    expect(main).toContain("desktopTrayLabel(runtime.locale, 'exitSafeMode')")
+    expect(main).toContain('notifyDesktopSafeModeActive(runtime, electronLogger)')
+    expect(main).toContain('safeModePaths !== undefined && DESKTOP_SAFE_MODE_DEFAULTS.settings.notifications.enabled')
+    expect(main).toContain('const setupWizardState = safeModePaths === undefined')
+    expect(main).toContain('if (safeModePaths === undefined && desktopSetupWizardRequired(')
+    expect(main).toContain('const safeModeDefaults = DESKTOP_SAFE_MODE_DEFAULTS')
+    expect(main).toContain('updateDesktopSetupWizardSettings(prepared.settingsDocument, safeModeDefaults.settings)')
+    expect(main).toContain('selectDesktopMarketProvider(marketUserDataDir, safeModeDefaults.market)')
+    expect(main).toContain('safeModeDefaults.settings.notifications')
   })
 
   it('exposes the Host plugin and desktop-owned client face', () => {
@@ -130,6 +159,8 @@ describe('published package surface', () => {
         '@deepseek-ai/dsh-api-remotes',
         '@deepseek-ai/dsh-client-connection',
         '@deepseek-ai/dsh-client-locale',
+        '@deepseek-ai/dsh-client-ui-conversation',
+        '@deepseek-ai/dsh-client-ui-input-trigger',
         '@deepseek-ai/dsh-client-ui-renderer',
         '@deepseek-ai/dsh-client-ui-settings',
         '@deepseek-ai/dsh-client-ui-settings-general',
@@ -149,14 +180,14 @@ describe('published package surface', () => {
   it('pins both selectable Market providers in the published runtime', () => {
     expect(manifest.dependencies).toMatchObject({
       'dsh-community-market': '0.1.0-dev.0',
-      dshmarket: '1.17.1',
+      dshmarket: '1.38.1',
     })
     expect(manifest.optionalDependencies ?? {}).not.toHaveProperty('dshmarket')
   })
 
   it('patches the browse panel with the Windows native-picker icon bridge', () => {
-    const patchPath = './patches/dsh-client-ui-directory-picker-browse@0.1.2-alpha.1.patch'
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-client-ui-directory-picker-browse'])
+    const patchPath = './patches/dsh-client-ui-directory-picker-browse@0.1.2-rc.1.patch'
+    expect(dshResolution('@deepseek-ai/dsh-client-ui-directory-picker-browse'))
       .toContain(patchPath)
     const patch = readFileSync(new URL(patchPath, workspaceRoot), 'utf8')
     const installedClient = readFileSync(new URL(
@@ -179,8 +210,8 @@ describe('published package surface', () => {
   })
 
   it('patches the browse backend to skip unreadable directory-looking entries', () => {
-    const patchPath = './patches/dsh-host-directory-picker-browse@0.1.2-alpha.1.patch'
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-host-directory-picker-browse'])
+    const patchPath = './patches/dsh-host-directory-picker-browse@0.1.2-rc.1.patch'
+    expect(dshResolution('@deepseek-ai/dsh-host-directory-picker-browse'))
       .toContain(patchPath)
     const patch = readFileSync(new URL(patchPath, workspaceRoot), 'utf8')
     const installedHost = readFileSync(new URL(
@@ -198,8 +229,8 @@ describe('published package surface', () => {
   })
 
   it('gives the Desktop settings section a dedicated display icon', () => {
-    const patchPath = './patches/dsh-client-ui-settings-general@0.1.2-alpha.1.patch'
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-client-ui-settings-general'])
+    const patchPath = './patches/dsh-client-ui-settings-general@0.1.2-rc.1.patch'
+    expect(dshResolution('@deepseek-ai/dsh-client-ui-settings-general'))
       .toContain(patchPath)
     const patch = readFileSync(new URL(patchPath, workspaceRoot), 'utf8')
     const installedClient = readFileSync(new URL(
@@ -219,22 +250,43 @@ describe('published package surface', () => {
     }
   })
 
-  it('contains no stale rc.2 DSH runtime resolution', () => {
+  it('keeps wide Markdown table scrollbars visible without hover', () => {
+    const patchPath = './patches/dsh-client-ui-primitives@0.1.2-rc.1.patch'
+    expect(dshResolution('@deepseek-ai/dsh-client-ui-primitives')).toContain(patchPath)
+    const patch = readFileSync(new URL(patchPath, workspaceRoot), 'utf8')
+    const installedStyles = readFileSync(new URL(
+      'node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/markdown/MarkdownText.module.css',
+      packageRoot,
+    ), 'utf8')
+    for (const styles of [patch, installedStyles]) {
+      expect(styles).toContain('overflow-x: auto;')
+      expect(styles).toContain('scrollbar-width: thin;')
+      expect(styles).toContain('::-webkit-scrollbar-thumb')
+      expect(styles).toContain('height: 8px;')
+      expect(styles).toContain('background: var(--dsw-alias-label-tertiary, #9098a3);')
+    }
+    expect(installedStyles).not.toContain('overflow-x: hidden;')
+    expect(installedStyles).not.toMatch(
+      /\.tableScroll:global\(\.md-table-wide\):hover,[\s\S]*?overflow-x: auto;/u,
+    )
+  })
+
+  it('keeps both Desktop channels on the RC1 runtime family', () => {
     const dshResolutions = Object.entries(workspaceManifest.resolutions ?? {})
       .filter(([selector]) => selector === '@deepseek-ai/dsh' || selector.startsWith('@deepseek-ai/dsh-'))
 
     expect(dshResolutions.length).toBeGreaterThan(0)
     for (const [selector, resolution] of dshResolutions) {
-      expect(selector).not.toContain('0.1.1-rc.2')
-      expect(String(resolution)).not.toContain('0.1.1-rc.2')
+      expect(selector).toMatch(/@npm:\^?0\.1\.2-rc\.1$/u)
+      expect(String(resolution)).toContain('0.1.2-rc.1')
     }
   })
 
   it('keeps the canonical web profile configurable while Desktop disables browser opening', () => {
-    const patchPath = './patches/dsh-web-app@0.1.2-alpha.1.patch'
+    const patchPath = './patches/dsh-web-app@0.1.2-rc.1.patch'
     const openPatchPath = './patches/open@11.0.1.patch'
     const openPatchResolution = `patch:open@npm%3A11.0.1#${openPatchPath}`
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-web-app']).toContain(patchPath)
+    expect(dshResolution('@deepseek-ai/dsh-web-app')).toContain(patchPath)
     expect(workspaceManifest.resolutions).toMatchObject({
       'open@npm:11.0.1': openPatchResolution,
       'open@npm:^11.0.0': openPatchResolution,
@@ -403,7 +455,7 @@ describe('published package surface', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
     const profileImport = main.indexOf('createDesktopWebProfile,')
     const profileService = main.indexOf('await hostCtx.plugin(DesktopProfileService, {')
-    const create = main.indexOf('create: name => createDesktopWebProfile(homeDir, name),', profileService)
+    const create = main.indexOf('create: name => createFreshDesktopProfile(name),', profileService)
     const list = main.indexOf('list: () => listDesktopProfiles(homeDir),', profileService)
     const persist = main.indexOf('persistSelection: name => { selectDesktopProfile(selectionStatePath, homeDir, name) },', profileService)
     const restart = main.indexOf('requestRestart: () => runtime.requestRestart(),', profileService)
@@ -414,6 +466,21 @@ describe('published package surface', () => {
     expect(list).toBeGreaterThan(create)
     expect(persist).toBeGreaterThan(list)
     expect(restart).toBeGreaterThan(persist)
+    expect(main).not.toContain('persistProfileSelection')
+  })
+
+  it('constructs every local HTML window through the shared security policy', () => {
+    for (const filename of [
+      'desktop-dialog-window.ts',
+      'profile-create-window.ts',
+      'profile-selection-window.ts',
+      'setup-wizard-window.ts',
+      'startup-recovery-window.ts',
+    ]) {
+      const source = readFileSync(new URL(`src/${filename}`, packageRoot), 'utf8')
+      expect(source, filename).toContain('createDesktopLocalWindow({')
+      expect(source, filename).not.toContain('new BrowserWindow({')
+    }
   })
 
   it('wires local crash evidence before Electron becomes ready', () => {
@@ -438,6 +505,8 @@ describe('published package surface', () => {
   it('creates unified Profile checkpoints before composition and records only after health', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
     const beginProfile = main.indexOf('const profileStartup = beginDesktopProfileStartup(')
+    const admissionGuard = main.indexOf('if (!recoveryModeRequested)', beginProfile)
+    const admission = main.indexOf('inspectDesktopProfileChannelAdmission(', admissionGuard)
     const checkpoint = main.indexOf('profileCheckpoint = new DesktopProfileCheckpoint({', beginProfile)
     const recoveryController = main.indexOf('startupRecoveryController = new DesktopStartupRecoveryController({', checkpoint)
     const prepare = main.indexOf('let prepared = prepareDesktopProfile(')
@@ -448,7 +517,9 @@ describe('published package surface', () => {
     const mount = main.indexOf('runtime.mountScheduled(),', awaitRenderer)
 
     expect(beginProfile).toBeGreaterThanOrEqual(0)
-    expect(checkpoint).toBeGreaterThan(beginProfile)
+    expect(admissionGuard).toBeGreaterThan(beginProfile)
+    expect(admission).toBeGreaterThan(admissionGuard)
+    expect(checkpoint).toBeGreaterThan(admission)
     expect(recoveryController).toBeGreaterThan(checkpoint)
     expect(prepare).toBeGreaterThan(recoveryController)
     expect(monitor).toBeGreaterThan(prepare)
@@ -459,6 +530,9 @@ describe('published package surface', () => {
     expect(main).not.toContain('DesktopStartupStateCommit')
     expect(main).not.toContain('DesktopInstallRecoveryStore')
     expect(main).not.toContain('lastKnownGood')
+    expect(main).toContain('desktopPackageName: DESKTOP_PACKAGE_NAME')
+    expect(main).toContain('releaseChannel: DESKTOP_RELEASE_CHANNEL')
+    expect(main).toContain('dshVersion: currentDshVersion')
   })
 
   it('finishes or skips per-Profile native setup before Host boot and the main window', () => {
@@ -497,7 +571,7 @@ describe('published package surface', () => {
     expect(main).toContain("setupResult.action === 'quit'")
     expect(main).toContain("setupResult.action === 'skip'")
     expect(main).toContain("'skipped',")
-    expect(main).toContain('clearDesktopSetupWizardState(marketUserDataDir, profileDir)')
+    expect(main).toContain('clearDesktopProfileUsageHistory(releaseUserDataLocations, profileDir)')
   })
 
   it('keeps active Profile preferences as the lazy source and serializes runtime mirrors', () => {
@@ -594,17 +668,26 @@ describe('published package surface', () => {
     expect(main).toContain('lifecycleStartupFailureReason(cause, runtime)')
   })
 
-  it('routes requested and failed startup through the unified recovery window without automatic mutation', () => {
+  it('keeps compatibility Profile selection separate from requested and failed recovery', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
+    const recoveryUi = readFileSync(new URL('src/native-ui/recovery/App.tsx', packageRoot), 'utf8')
+    const selectorUi = readFileSync(new URL('src/native-ui/profile-selector/App.tsx', packageRoot), 'utf8')
     const windows = [...main.matchAll(/await openStartupRecoveryWindow\(/gu)]
       .map(match => match.index)
     const requested = main.indexOf('if (recoveryModeRequested)')
+    const beginProfile = main.indexOf('const profileStartup = beginDesktopProfileStartup(')
+    const profileActions = main.indexOf('startupRecoveryProfileActions = {')
     const prepare = main.indexOf('let prepared = prepareDesktopProfile(')
     const quiesce = main.indexOf('const recoveryActionsSafe = await generation.quiesceForRecovery()')
     const configureTerminal = main.indexOf('runtime.configureTerminal({')
     const terminalAvailable = main.indexOf('recoveryTerminalAvailable = true')
+    const compatibilitySelector = main.indexOf('await openCompatibilityProfileSelector()')
 
     expect(windows).toHaveLength(2)
+    expect(compatibilitySelector).toBeGreaterThanOrEqual(0)
+    expect(compatibilitySelector).toBeLessThan(requested)
+    expect(profileActions).toBeGreaterThanOrEqual(0)
+    expect(profileActions).toBeLessThan(beginProfile)
     expect(windows[0]).toBeGreaterThan(requested)
     expect(windows[0]).toBeLessThan(prepare)
     expect(configureTerminal).toBeGreaterThanOrEqual(0)
@@ -612,9 +695,18 @@ describe('published package surface', () => {
     expect(terminalAvailable).toBeGreaterThan(configureTerminal)
     expect(terminalAvailable).toBeLessThan(requested)
     expect(main.match(/runtime\.configureTerminal\(\{/gu)).toHaveLength(1)
-    expect(windows[1]).toBeGreaterThan(windows[0]!)
     expect(quiesce).toBeGreaterThan(prepare)
     expect(windows[1]).toBeGreaterThan(quiesce)
+    expect(main).toContain("buttons: [copy.switchProfile, copy.useProfileAnyway, copy.quit]")
+    expect(main).toContain('advisory: copy.profileCompatibilityWarning')
+    expect(main).toContain("presentation: 'profile-compatibility'")
+    expect(main).not.toContain('profileRecoveryActionUsed')
+    expect(main).toContain('let expectedRecoveryProfileName = activeProfileName')
+    expect(main.match(/expectedRecoveryProfileName = name/gu)).toHaveLength(2)
+    expect(main).toContain('selection.active !== expectedRecoveryProfileName')
+    expect(main).not.toContain("'Profile selection was requested from the compatibility warning.'")
+    expect(recoveryUi).toContain("from '../shared/ProfileSelector.tsx'")
+    expect(selectorUi).toContain("from '../shared/ProfileSelector.tsx'")
     expect(main).not.toContain('installRecovery')
     expect(main).not.toContain('restoreLatest')
     expect(main).not.toContain('restoreLastKnownGood')
@@ -636,7 +728,8 @@ describe('published package surface', () => {
   })
 
   it('fixes the installed application identity', () => {
-    expect(manifest.version).toBe(workspaceManifest.version)
+    expect(workspaceManifest.version).toBeUndefined()
+    expect(manifest.version).toBe('2.0.5')
     expect(manifest.build?.productName).toBe('gs-worker')
     expect(manifest.build?.appId).toBe('com.enterprise.officeagent')
     expect(manifest.build?.asarUnpack).toEqual([
@@ -651,12 +744,14 @@ describe('published package surface', () => {
     expect(manifest.files).toEqual(expect.arrayContaining([
       'build/app-icon.png',
       'build/app-icon-mac.png',
+      'build/tray-icon.svg',
       'build/tray-icon*.png',
       'docs/**',
     ]))
     expect(manifest.build?.files).toEqual([
       'build/app-icon.png',
       'build/app-icon-mac.png',
+      'build/tray-icon.svg',
       'build/tray-icon*.png',
       'cordis.patch.yml',
       'lib/**',
@@ -678,6 +773,7 @@ describe('published package surface', () => {
     expect(manifest.build?.win?.artifactName).toBe('gs-worker-${version}-${arch}-Portable.${ext}')
     expect(manifest.build?.nsis).toEqual({
       include: 'installer.nsh',
+      license: 'THIRD_PARTY_NOTICES.md',
       oneClick: false,
       perMachine: false,
       allowElevation: true,
@@ -760,13 +856,15 @@ describe('published package surface', () => {
     )
 
     expect(windowsJob).not.toContain('- run: yarn check')
-    expect(windowsJob).toContain('- run: yarn workspace dsh-plugin-desktop check:win-package')
-    expect(windowsJob).toContain('run: yarn workspace dsh-plugin-desktop dist:win')
-    expect(windowsJob).toContain('run: yarn workspace dsh-plugin-desktop dist:win-portable')
+    expect(windowsJob).toContain('workspace: [dsh-plugin-desktop, dsh-plugin-desktop-beta]')
+    expect(windowsJob).toContain('- run: yarn workspace ${{ matrix.workspace }} check:win-package')
+    expect(windowsJob).toContain('run: yarn workspace ${{ matrix.workspace }} dist:win')
+    expect(windowsJob).toContain('run: yarn workspace ${{ matrix.workspace }} dist:win-portable')
     expect(windowsJob).toContain('DSH_PACKAGE_CHECK_ALREADY_RAN: \'1\'')
     expect(macosJob).not.toContain('- run: yarn check')
-    expect(macosJob).toContain('- run: yarn workspace dsh-plugin-desktop check:mac-package')
-    expect(macosJob).toContain('run: yarn workspace dsh-plugin-desktop dist:mac-smoke')
+    expect(macosJob).toContain('workspace: [dsh-plugin-desktop, dsh-plugin-desktop-beta]')
+    expect(macosJob).toContain('- run: yarn workspace ${{ matrix.workspace }} check:mac-package')
+    expect(macosJob).toContain('run: yarn workspace ${{ matrix.workspace }} dist:mac-smoke')
     expect(macosJob).toContain('DSH_PACKAGE_CHECK_ALREADY_RAN: \'1\'')
     expect(macosJob).not.toContain('- run: yarn dist:mac-smoke')
   })
@@ -871,6 +969,28 @@ describe('published package surface', () => {
     expect(installedPnpm.version).toBe('11.8.0')
   })
 
+  it('patches packaged pnpm to disable non-positive and invalid release-age policies', () => {
+    const patchPath = './patches/pnpm@11.8.0.patch'
+    const patchResolution = `patch:pnpm@npm%3A11.8.0#${patchPath}`
+    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
+    const patch = readFileSync(new URL(patchPath, workspaceRoot), 'utf8')
+    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
+    const pnpmManifest = workspaceRequire.resolve('pnpm')
+    const installedRuntime = readFileSync(join(dirname(pnpmManifest), 'dist/pnpm.mjs'), 'utf8')
+
+    expect(workspaceManifest.resolutions).toMatchObject({
+      'pnpm@npm:11.8.0': patchResolution,
+    })
+    expect(lockfile).toContain('pnpm@patch:pnpm@npm%3A11.8.0#./patches/pnpm@11.8.0.patch')
+    for (const source of [patch, installedRuntime]) {
+      expect(source).toContain('const minimumReleaseAge = Number(opts3.minimumReleaseAge);')
+      expect(source).toContain('Number.isFinite(minimumReleaseAge) && minimumReleaseAge > 0')
+      expect(source).toContain('const configuredMinimumReleaseAge = Number(opts3.minimumReleaseAge);')
+      expect(source).toContain('!Number.isFinite(ts) || !Number.isFinite(cutoff)')
+    }
+    expect(installedRuntime).not.toContain('const ageCheckActive = Boolean(opts3.minimumReleaseAge);')
+  })
+
   it('packages the native-compiled Koffi Windows runtime', () => {
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
 
@@ -885,8 +1005,8 @@ describe('published package surface', () => {
   })
 
   it('hides official plugin-manager and general subprocess consoles on Windows', () => {
-    const dshPatchPath = './patches/dsh@0.1.2-alpha.1.patch'
-    const subprocessPatchPath = './patches/dsh-subprocess-local@0.1.2-alpha.1.patch'
+    const dshPatchPath = './patches/dsh@0.1.2-rc.1.patch'
+    const subprocessPatchPath = './patches/dsh-subprocess-local@0.1.2-rc.1.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const dshPatch = readFileSync(new URL(dshPatchPath, workspaceRoot), 'utf8')
     const subprocessPatch = readFileSync(new URL(subprocessPatchPath, workspaceRoot), 'utf8')
@@ -899,8 +1019,8 @@ describe('published package surface', () => {
     const subprocessManifest = workspaceRequire.resolve('@deepseek-ai/dsh-subprocess-local/package.json')
     const subprocessRuntime = readFileSync(join(dirname(subprocessManifest), 'lib/index.js'), 'utf8')
 
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh']).toContain(dshPatchPath)
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-subprocess-local']).toContain(subprocessPatchPath)
+    expect(dshResolution('@deepseek-ai/dsh')).toContain(dshPatchPath)
+    expect(dshResolution('@deepseek-ai/dsh-subprocess-local')).toContain(subprocessPatchPath)
     expect(lockfile).toContain(dshPatchPath)
     expect(lockfile).toContain(subprocessPatchPath)
     expect(dshPatch).toContain('+\t\twindowsHide: true')
@@ -969,16 +1089,16 @@ describe('published package surface', () => {
   })
 
   it('starts restricted Windows shells with a hidden console show state', () => {
-    const patchPath = './patches/dsh-win32-process@0.1.2-alpha.1.patch'
+    const patchPath = './patches/dsh-win32-process@0.1.2-rc.1.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
-    const patch = readFileSync(new URL('patches/dsh-win32-process@0.1.2-alpha.1.patch', workspaceRoot), 'utf8')
+    const patch = readFileSync(new URL('patches/dsh-win32-process@0.1.2-rc.1.patch', workspaceRoot), 'utf8')
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
     const sandboxManifest = workspaceRequire.resolve('@deepseek-ai/dsh-sandbox-windows-acl/package.json')
     const sandboxRequire = createRequire(sandboxManifest)
     const processManifest = sandboxRequire.resolve('@deepseek-ai/dsh-win32-process/package.json')
     const installedRuntime = readFileSync(join(dirname(processManifest), 'lib/index.js'), 'utf8')
 
-    expect(workspaceManifest.resolutions?.['@deepseek-ai/dsh-win32-process']).toContain(patchPath)
+    expect(dshResolution('@deepseek-ai/dsh-win32-process')).toContain(patchPath)
     expect(lockfile).toContain(patchPath)
     expect(patch.match(/^\+\s*dwFlags: 257,\r?$/gmu)).toHaveLength(2)
     expect(patch.match(/^\+\s*wShowWindow: 0,\r?$/gmu)).toHaveLength(2)

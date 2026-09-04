@@ -182,13 +182,12 @@ function finishPostResponse<T extends object>(
   reportError: (operation: string, cause: unknown) => void,
 ): void {
   finishJson(res, statusCode, operation.response)
-  if (operation.afterResponse === undefined) return
+  const afterResponse = operation.afterResponse
+  if (afterResponse === undefined) return
   setImmediate(() => {
-    try {
-      operation.afterResponse?.()
-    } catch (cause) {
+    void Promise.resolve().then(afterResponse).catch((cause: unknown) => {
       reportError(`${operationName} after response`, cause)
-    }
+    })
   })
 }
 

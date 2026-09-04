@@ -2,16 +2,6 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type {
-  ComposerAttachment,
-  DraftAttachmentId,
-  ReferenceInsert,
-} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type {
-  InputTriggerCandidate,
-  InputTriggerSource,
-  TokenSpan,
-} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference/types'
 import { formatFileMention } from '@deepseek-ai/dsh-file-reference/grammar'
 import type { GsSkillsView } from '../server/gs-contract.ts'
@@ -26,6 +16,70 @@ const SKILLS_ACTION = 'skills'
 const GOAL_ACTION = 'goal'
 const ROOT_ACTION = 'root'
 const EMPTY_ACTION = 'empty'
+
+/** Browser-safe subset of the upstream input-trigger contract consumed here. */
+export interface TokenSpan {
+  readonly start: number
+  readonly end: number
+  readonly draftRev: number
+}
+
+export interface InputTriggerCandidate {
+  readonly name: string
+  readonly description?: string
+  readonly icon?: 'file' | 'folder' | 'session'
+  readonly value?: string
+  readonly drill?: boolean
+}
+
+export interface CandidateRequest {
+  readonly query: string
+  readonly quoted?: boolean
+  readonly position: 'leading' | 'inline'
+  readonly drilled: boolean
+  readonly signal: AbortSignal
+}
+
+export interface InputTriggerPick {
+  readonly candidate: InputTriggerCandidate
+  readonly session: { readonly sessionId: SessionId }
+  readonly position: 'leading' | 'inline'
+  readonly via: 'menu' | 'space' | 'enter'
+  readonly action: 'pick' | 'drill'
+  readonly span: TokenSpan
+}
+
+type PickOutcome = { readonly text: string; readonly continue?: boolean } | 'handled' | undefined
+
+export interface InputTriggerSource {
+  readonly trigger: '/' | '@'
+  readonly name: string
+  readonly order?: number
+  readonly showGroupTitle?: boolean
+  candidates(
+    session: { readonly sessionId: SessionId },
+    request: CandidateRequest,
+  ): Promise<readonly InputTriggerCandidate[]>
+  header?(
+    session: { readonly sessionId: SessionId },
+    request: Pick<CandidateRequest, 'query' | 'quoted' | 'drilled'>,
+  ): readonly { readonly label: string; readonly value: string; readonly current?: boolean }[] | undefined
+  onPick(pick: InputTriggerPick): PickOutcome
+}
+
+type DraftAttachmentId = string
+
+interface ComposerAttachment {
+  readonly id: DraftAttachmentId
+}
+
+interface ReferenceInsert {
+  readonly source: string
+  readonly ref: string
+  readonly label: string
+  readonly appearance?: 'session' | 'file' | 'folder'
+  readonly clipboardText: string
+}
 
 /** MIME types admitted by the draft-image pipeline; every other type becomes a file mention. */
 const IMAGE_MIME_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
@@ -73,12 +127,11 @@ function rootCandidates(position: 'leading' | 'inline'): readonly InputTriggerCa
     },
     {
       name: '技能',
-      icon: 'skill',
       value: SKILLS_ACTION,
       drill: true,
     },
     ...(position === 'leading'
-      ? [{ name: '目标', icon: 'goal', value: GOAL_ACTION } satisfies InputTriggerCandidate]
+      ? [{ name: '目标', value: GOAL_ACTION } satisfies InputTriggerCandidate]
       : []),
   ]
 }
@@ -104,7 +157,6 @@ export function createDesktopComposerActionSource(
     trigger: '/',
     name: DESKTOP_COMPOSER_ACTION_SOURCE,
     order: -100,
-    launchers: ['command'],
     showGroupTitle: false,
     async candidates(_session, request) {
       if (request.query.startsWith(DESKTOP_SKILL_MENU_PREFIX)) {

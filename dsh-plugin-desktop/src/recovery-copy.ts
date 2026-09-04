@@ -4,7 +4,7 @@ import { currentBrand, interpolateBrand } from './brand.ts'
 import type { DesktopLocale } from './runtime.ts'
 import type { DesktopStartupRecoveryOperationStage } from './startup-recovery-controller.ts'
 
-export type DesktopRecoveryTab = 'plugins' | 'rollback' | 'profiles' | 'diagnostics'
+export type DesktopRecoveryTab = 'quick' | 'plugins' | 'rollback' | 'profiles' | 'diagnostics'
 
 export type DesktopStartupFailureStage =
   | 'electron-ready'
@@ -26,6 +26,21 @@ export interface DesktopRecoveryCopy {
   readonly failureStage: string
   readonly stageLabels: Readonly<Record<DesktopStartupFailureStage, string>>
   readonly tabs: Readonly<Record<DesktopRecoveryTab, string>>
+  readonly quickRecovery: string
+  readonly quickRecoveryBody: string
+  readonly profileGuide: string
+  readonly profileGuideBody: string
+  readonly safeMode: string
+  readonly safeModeBody: string
+  readonly safeModeActiveBody: string
+  readonly safeModeUnavailable: string
+  readonly enterSafeMode: string
+  readonly confirmSafeMode: string
+  readonly confirmSafeModeMessage: string
+  readonly confirmSafeModeBody: string
+  readonly confirmSafeModeAction: string
+  readonly safeModeNotificationTitle: string
+  readonly safeModeNotificationBody: string
   readonly checkpoints: string
   readonly checkpointsUnavailable: string
   readonly rollbackBody: string
@@ -71,6 +86,7 @@ export interface DesktopRecoveryCopy {
   readonly restart: string
   readonly quit: string
   readonly working: string
+  readonly back: string
   readonly cancel: string
   readonly confirmUninstall: string
   readonly confirmUninstallBody: string
@@ -111,7 +127,22 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
       'renderer-startup': 'Desktop interface startup',
       'health-commit': 'Startup health confirmation',
     },
-    tabs: { plugins: 'Plugin management', rollback: 'Rollback', profiles: 'Switch Profile', diagnostics: 'Diagnostics' },
+    tabs: { quick: 'Quick recovery', plugins: 'Plugin management', rollback: 'Rollback', profiles: 'Switch Profile', diagnostics: 'Diagnostics' },
+    quickRecovery: 'Quick recovery',
+    quickRecoveryBody: 'You can enter Safe Mode first and use an isolated environment to diagnose the problem. You can also remove a problematic plugin, roll back directly to the configuration from before the last healthy startup, or switch to another Profile. Restart after making changes.',
+    profileGuide: 'What is a Profile?',
+    profileGuideBody: 'A Profile is a DSH runtime configuration that decides which plugins load. Plugin information is not shared between Profiles; Profiles under the same DSH Home still share session and workspace data.',
+    safeMode: 'Safe Mode',
+    safeModeBody: 'Safe Mode creates a disposable DSH home under Desktop private data. It does not read the normal ~/.dsh, so its plugins, settings, sessions, and workspaces start clean. The environment is deleted on the next normal launch after you quit or restart Safe Mode.',
+    safeModeActiveBody: 'This recovery session already belongs to Safe Mode. You can roll it back or switch its temporary Profile, then restart to leave Safe Mode.',
+    safeModeUnavailable: 'Safe Mode cannot be prepared at this startup stage. Diagnostics remain available.',
+    enterSafeMode: 'Enter Safe Mode',
+    confirmSafeMode: 'Enter Safe Mode?',
+    confirmSafeModeMessage: 'Restart with a clean, temporary DSH environment?',
+    confirmSafeModeBody: 'DSH Desktop will create an isolated DSH home without reading ~/.dsh. Your normal Profiles and data are not changed. The temporary environment is deleted on the next normal launch after you leave Safe Mode.',
+    confirmSafeModeAction: 'Restart in Safe Mode',
+    safeModeNotificationTitle: 'Safe Mode is active',
+    safeModeNotificationBody: 'This session uses a temporary DSH home instead of ~/.dsh. Restart or quit, then launch normally to delete it and return to your usual environment.',
     checkpoints: 'Healthy-start checkpoints',
     checkpointsUnavailable: 'Checkpoint information is unavailable for this startup stage.',
     rollbackBody: 'Choose one of the three healthy-start slots to restore the current Profile together with shared settings.yaml and the Harness-home patch.',
@@ -157,6 +188,7 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     restart: 'Restart {brand}',
     quit: 'Quit',
     working: 'Applying the recovery action…',
+    back: 'Back',
     cancel: 'Cancel',
     confirmUninstall: 'Uninstall this plugin?',
     confirmUninstallBody: 'DSH will remove this dependency from the current Profile and reconcile its plugin layers. This does not depend on which market installed it.',
@@ -199,7 +231,22 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
       'renderer-startup': '桌面界面启动',
       'health-commit': '启动健康状态确认',
     },
-    tabs: { plugins: '插件管理', rollback: '回滚', profiles: '切换 Profile', diagnostics: '诊断' },
+    tabs: { quick: '快速恢复', plugins: '插件管理', rollback: '回滚', profiles: '切换 Profile', diagnostics: '诊断' },
+    quickRecovery: '快速恢复',
+    quickRecoveryBody: '您可以先进入安全模式，使用独立环境排查问题；也可以考虑卸载异常插件，或者直接回滚至上一次正常启动前的配置，或切换到其他 Profile。修改后需要重启才能生效。',
+    profileGuide: 'Profile 是什么？',
+    profileGuideBody: 'Profile 是一套 DSH 运行配置，决定启动时加载哪些插件，不同Profile的插件信息不共享；同一个 DSH Home 下的多个 Profile 仍共享会话和工作区数据。',
+    safeMode: '安全模式',
+    safeModeBody: '安全模式会在桌面版私有数据目录中创建一次性的 DSH Home，不读取默认的 ~/.dsh，因此插件、设置、会话和工作区记录都会从全新环境开始。退出或重启安全模式后，下一次普通启动会自动删除该环境。',
+    safeModeActiveBody: '当前恢复流程已处于安全模式。你可以回滚或切换临时 Profile；重启后将退出安全模式。',
+    safeModeUnavailable: '当前启动阶段无法创建安全模式环境，但仍可查看诊断信息。',
+    enterSafeMode: '进入安全模式',
+    confirmSafeMode: '进入安全模式？',
+    confirmSafeModeMessage: '使用全新的一次性 DSH 环境重启？',
+    confirmSafeModeBody: 'DSH Desktop 将创建一个不读取 ~/.dsh 的独立 DSH Home，不会修改原有 Profile 和数据。退出安全模式后，下一次普通启动会自动删除临时环境。',
+    confirmSafeModeAction: '重启到安全模式',
+    safeModeNotificationTitle: '安全模式已启用',
+    safeModeNotificationBody: '当前使用临时 DSH Home，不会读取 ~/.dsh。重启或退出后再普通启动，即会删除临时环境并返回原有环境。',
     checkpoints: '健康启动 Checkpoint',
     checkpointsUnavailable: '当前启动阶段无法读取 Checkpoint 信息。',
     rollbackBody: '从三个健康启动槽位中选择一个，同时恢复当前 Profile、共享 settings.yaml 和 DSH home 补丁。',
@@ -245,6 +292,7 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     restart: '重启{brand}',
     quit: '退出',
     working: '正在执行恢复操作…',
+    back: '返回',
     cancel: '取消',
     confirmUninstall: '卸载这个插件？',
     confirmUninstallBody: 'DSH 将从当前 Profile 中移除此依赖，并重新整理插件层。无论插件由哪个市场安装，都会使用相同的卸载流程。',

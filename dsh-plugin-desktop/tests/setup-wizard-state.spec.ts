@@ -29,7 +29,7 @@ const temporaryDirectories: string[] = []
 const RECORDED_AT = '2026-08-28T04:05:06.789Z'
 const CURRENT_VERSIONS: DesktopSetupWizardVersions = Object.freeze({
   desktopVersion: '2.0.3',
-  dshVersion: '0.1.2-alpha.1',
+  dshVersion: '0.1.1-rc.2',
   setupRevision: desktopSetupWizardStateConstants.setupRevision,
 })
 
@@ -171,12 +171,12 @@ describe('Desktop Setup Wizard state', () => {
     })).toBe(false)
     expect(desktopSetupWizardRequired(state, {
       ...CURRENT_VERSIONS,
-      dshVersion: '0.1.1',
+      dshVersion: '0.1.1-rc.1',
     })).toBe(false)
     expect(desktopSetupWizardRequired(state, {
       ...CURRENT_VERSIONS,
       desktopVersion: '2.0.4',
-      dshVersion: '0.1.1',
+      dshVersion: '0.1.1-rc.1',
     })).toBe(true)
   })
 

@@ -94,6 +94,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.product == 'true'
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [dsh-plugin-desktop, dsh-plugin-desktop-beta]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -111,15 +115,15 @@ jobs:
           path: ${{ steps.yarn-cache.outputs.dir }}
           key: yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
       - run: yarn install --immutable
-      - run: yarn workspace dsh-plugin-desktop check:win-package
+      - run: yarn workspace ${{ matrix.workspace }} check:win-package
       - name: Build Windows installer
         env:
           DSH_PACKAGE_CHECK_ALREADY_RAN: '1'
-        run: yarn workspace dsh-plugin-desktop dist:win
+        run: yarn workspace ${{ matrix.workspace }} dist:win
       - name: Build Windows portable archive
         env:
           DSH_PACKAGE_CHECK_ALREADY_RAN: '1'
-        run: yarn workspace dsh-plugin-desktop dist:win-portable
+        run: yarn workspace ${{ matrix.workspace }} dist:win-portable
 
   # macOS-only universal packaging smoke on a real macOS runner: the signed
   # release is built manually on a credentialed machine, so an unsigned DMG
@@ -130,6 +134,10 @@ jobs:
     if: needs.changes.outputs.product == 'true'
     runs-on: macos-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [dsh-plugin-desktop, dsh-plugin-desktop-beta]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -147,11 +155,11 @@ jobs:
           path: ${{ steps.yarn-cache.outputs.dir }}
           key: yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
       - run: yarn install --immutable
-      - run: yarn workspace dsh-plugin-desktop check:mac-package
+      - run: yarn workspace ${{ matrix.workspace }} check:mac-package
       - name: Build macOS smoke artifact
         env:
           DSH_PACKAGE_CHECK_ALREADY_RAN: '1'
-        run: yarn workspace dsh-plugin-desktop dist:mac-smoke
+        run: yarn workspace ${{ matrix.workspace }} dist:mac-smoke
 
   # Upstream toolchain smoke: the portable-shell scripts must resolve the
   # pinned submodule's own Yarn/pnpm release on Windows.
