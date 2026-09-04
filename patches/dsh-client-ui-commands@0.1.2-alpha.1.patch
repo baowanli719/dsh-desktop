@@ -1,0 +1,60 @@
+diff --git a/lib/client.js b/lib/client.js
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -479,6 +479,8 @@ window.__ModuleLoader__.load({
+ 			for (const score of previous) best = Math.max(best, score);
+ 			return best === noMatch ? void 0 : best;
+ 		}
++		/** Query prefix marking the drilled commands submenu (desktop collapse). */
++		const COMMANDS_MENU_PREFIX = "指令/";
+ 		/** Case-insensitive fuzzy filtering with stable ordering for equal matches. */
+ 		function fuzzyCandidates(candidates, rawQuery) {
+ 			const query = rawQuery.toLowerCase();
+@@ -533,8 +535,10 @@ window.__ModuleLoader__.load({
+ 				ctx.effect(() => inputTriggers.registerSource({
+ 					trigger: "/",
+ 					name: "command",
++					showGroupTitle: false,
+ 					candidates: (session, req) => this.candidates(session, req),
+ 					onPick: (pick) => this.dispatch(pick),
++					header: (session, req) => this.header(session, req),
+ 					matchSpace: (session, token) => this.matchSpace(session, token),
+ 					matchEnter: (session, line, signal, envelope) => this.matchEnter(session, line, signal, envelope),
+ 					warm: (session) => {
+@@ -639,6 +643,14 @@ window.__ModuleLoader__.load({
+ 			}
+ 			/** Menu candidates: host catalog + contribution availability, then position filtering and fuzzy name ranking. */
+ 			async candidates(session, req) {
++				if (req.query === "") return [{
++					name: "指令",
++					value: "commands",
++					drill: true,
++					icon: "command"
++				}];
++				const drilled = req.query.startsWith(COMMANDS_MENU_PREFIX);
++				const query = drilled ? req.query.slice(COMMANDS_MENU_PREFIX.length) : req.query;
+ 				const list = await this.directory.ensureReady(session.sessionId, req.signal);
+ 				const rows = [];
+ 				const seen = /* @__PURE__ */ new Set();
+@@ -658,10 +670,20 @@ window.__ModuleLoader__.load({
+ 						description: contribution.description
+ 					});
+ 				}
+-				return fuzzyCandidates(rows.filter((c) => req.position === "leading" || c.hint === void 0), req.query);
++				return fuzzyCandidates(rows.filter((c) => req.position === "leading" || c.hint === void 0), query);
++			}
++			/** Breadcrumb for the drilled commands submenu (desktop collapse). */
++			header(session, req) {
++				if (!req.query.startsWith(COMMANDS_MENU_PREFIX)) return void 0;
++				return [
++					{ label: "功能", value: "root" },
++					{ label: "指令", value: "commands", current: true }
++				];
+ 			}
+ 			/** Decision table, menu column: contribution/decorated-host → popup; host input → claim; host bare → detached execute. */
+ 			dispatch(pick) {
++				if (pick.candidate.value === "commands") return { text: `/${COMMANDS_MENU_PREFIX}`, continue: true };
++				if (pick.candidate.value === "root") return { text: "/", continue: true };
+ 				const name = pick.candidate.name;
+ 				const contribution = this.live.contributions.get(name);
+ 				if (contribution !== void 0 && contribution.available(pick.session)) {

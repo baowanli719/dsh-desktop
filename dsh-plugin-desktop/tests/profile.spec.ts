@@ -1,18 +1,27 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { composeEntries, initProfile, PROFILE_TEMPLATES } from '@deepseek-ai/dsh-app-boot'
 import {
+  DESKTOP_AGENT_PERSONA,
   DESKTOP_PACKAGE_NAME,
+  DESKTOP_PRESET_ROOT_DIR,
+  assertEffectiveLlmRows,
+  assertEffectiveSkillRows,
   desktopShellModeFromSettings,
   desktopStartupSettingsFromSettings,
   desktopBundleList,
   ensureDesktopProfile,
+  filterLlmPatches,
+  filterLocalSkillPatches,
+  materializeDesktopPresetRoot,
   prepareDesktopProfile,
   readDesktopShellMode,
+  rewriteDesktopPresetPersona,
   shippedPresetRoot,
+  stripLocalSkillCompositionRows,
   validateDshMarketBundlePatches,
 } from '../src/profile.ts'
 import { DESKTOP_MARKET_IDENTITIES } from '../src/desktop-market.ts'
@@ -304,7 +313,7 @@ virtualStoreDirMaxLength: 60
     })
     expect(inserted).toContainEqual(expect.objectContaining({
       name: DESKTOP_PACKAGE_NAME,
-      config: { mode: 'compatibility' },
+      config: { mode: 'compatibility', sessionLogButton: false },
     }))
     expect(patches).toContainEqual(expect.objectContaining({
       id: 'webserver',
@@ -334,6 +343,9 @@ virtualStoreDirMaxLength: 60
       ['ui-layout', '@deepseek-ai/dsh-client-ui-layout'],
       ['ui-sidebar', '@deepseek-ai/dsh-client-ui-sidebar'],
       ['ui-conversation', '@deepseek-ai/dsh-client-ui-conversation'],
+      ['ui-attachment', '@deepseek-ai/dsh-client-ui-attachment'],
+      ['ui-skill', '@deepseek-ai/dsh-client-ui-skill'],
+      ['ui-goal', '@deepseek-ai/dsh-client-ui-goal'],
     ] as const) {
       const matching = rows.filter(row => row.id === id)
       expect(matching).toHaveLength(1)
@@ -679,7 +691,7 @@ virtualStoreDirMaxLength: 60
     })
     expect(rows.find(row => row.id === 'desktop-shell')).toEqual(expect.objectContaining({
       name: 'dsh-plugin-desktop',
-      config: expect.objectContaining({ mode: 'compatibility' }),
+      config: expect.objectContaining({ mode: 'compatibility', sessionLogButton: false }),
     }))
   })
 
@@ -952,7 +964,9 @@ virtualStoreDirMaxLength: 60
     expect(rows.find(row => row.id === 'agent-presets')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-agent-presets',
       config: expect.objectContaining({
-        roots: [{ path: shippedPresetRoot(), trust: 'system' }],
+        roots: [{ path: join(home, 'profiles', 'desktop', DESKTOP_PRESET_ROOT_DIR), trust: 'system' }],
+        includeShippedRoot: false,
+        includeUserRoot: false,
       }),
     }))
     expect(rows.find(row => row.id === 'agent-presets')?.disabled).toBeFalsy()
@@ -1124,5 +1138,383 @@ virtualStoreDirMaxLength: 60
       name: 'third-party-subprocess',
     }))
     expect(rows.map(row => row.id)).not.toContain('desktop-windows-subprocess')
+  })
+})
+
+describe('local skill ban', () => {
+  it('strips local-skill rows from non-desktop patch layers', () => {
+    const filtered = filterLocalSkillPatches([
+      // A user-layer re-enable attempt is removed outright.
+      { id: 'skill-filesystem', disabled: false },
+      // tool-skill is no longer banned: patches may mount or re-enable it.
+      { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+      // Name-based references match the banned identity too.
+      { name: '@deepseek-ai/dsh-skill-filesystem', config: {} },
+      { id: 'unrelated', disabled: false },
+      {
+        insert: [
+          { id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem' },
+          { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+          { id: 'kept', name: 'third-party-plugin' },
+        ],
+      },
+      {
+        insert: [{
+          id: 'group',
+          name: 'cordis:group',
+          group: true,
+          config: [
+            { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+            { id: 'nested-kept', name: 'third-party-nested' },
+          ],
+        }],
+      },
+    ])
+
+    expect(filtered).toEqual([
+      { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+      { id: 'unrelated', disabled: false },
+      {
+        insert: [
+          { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+          { id: 'kept', name: 'third-party-plugin' },
+        ],
+      },
+      {
+        insert: [{
+          id: 'group',
+          name: 'cordis:group',
+          group: true,
+          config: [
+            { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+            { id: 'nested-kept', name: 'third-party-nested' },
+          ],
+        }],
+      },
+    ])
+  })
+
+  it('asserts no enabled local-skill row survives composition and tool-skill keeps its canonical identity', () => {
+    expect(() => assertEffectiveSkillRows([])).not.toThrow()
+    expect(() => assertEffectiveSkillRows([
+      { id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem', disabled: true },
+      { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill', disabled: true },
+    ])).not.toThrow()
+    // An enabled tool-skill row with the canonical package is legal.
+    expect(() => assertEffectiveSkillRows([
+      { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+    ])).not.toThrow()
+    expect(() => assertEffectiveSkillRows([
+      { id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem' },
+    ])).toThrow(/local skill provider/)
+    // An enabled tool-skill row carrying a non-canonical package is an impostor.
+    expect(() => assertEffectiveSkillRows([
+      { id: 'tool-skill', name: 'third-party-tool-skill' },
+    ])).toThrow(/pinned tool-skill row/)
+    expect(() => assertEffectiveSkillRows([{
+      id: 'group',
+      name: 'cordis:group',
+      group: true,
+      config: [{ name: '@deepseek-ai/dsh-tool-skill' }],
+    }])).toThrow(/pinned tool-skill row/)
+  })
+
+  it('sanitizes shipped presets without dropping their non-skill rows', () => {
+    const home = temporaryHome()
+    const target = join(home, 'sanitized-presets')
+    materializeDesktopPresetRoot(shippedPresetRoot(), target)
+
+    for (const preset of ['standard', 'minimal', 'ptc', 'cordis']) {
+      const composition = readFileSync(join(target, preset, 'agent.cordis.yml'), 'utf8')
+      expect(composition).not.toContain('dsh-skill-filesystem')
+      expect(composition).toContain('!!js')
+      expect(composition).toContain('process.platform')
+      expect(composition).not.toContain('[object Object]')
+      expect(readFileSync(join(target, preset, 'preset.yml'), 'utf8').length).toBeGreaterThan(0)
+    }
+    // tool-skill stays mounted: every preset that carried the row keeps it.
+    for (const preset of ['standard', 'ptc', 'cordis']) {
+      expect(readFileSync(join(target, preset, 'agent.cordis.yml'), 'utf8'))
+        .toContain("name: '@deepseek-ai/dsh-tool-skill'")
+    }
+    expect(readFileSync(join(target, 'standard', 'agent.cordis.yml'), 'utf8'))
+      .toContain("name: '@deepseek-ai/dsh-persona'")
+    // The cordis preset's bundled skills directory is stripped with its mount.
+    expect(existsSync(join(target, 'cordis', 'skills'))).toBe(false)
+    // Re-materialization replaces a previous root rather than failing on it.
+    materializeDesktopPresetRoot(shippedPresetRoot(), target)
+    expect(existsSync(join(target, 'standard', 'agent.cordis.yml'))).toBe(true)
+  })
+
+  it('retexts shipped preset personas to the Desktop office assistant', () => {
+    const home = temporaryHome()
+    const target = join(home, 'persona-presets')
+    materializeDesktopPresetRoot(shippedPresetRoot(), target)
+
+    for (const preset of ['standard', 'minimal', 'ptc', 'cordis']) {
+      const composition = readFileSync(join(target, preset, 'agent.cordis.yml'), 'utf8')
+      expect(composition).toContain("name: '@deepseek-ai/dsh-persona'")
+      expect(composition).toContain(DESKTOP_AGENT_PERSONA)
+      expect(composition).not.toContain('You are a coding agent')
+      expect(composition).not.toContain('helpful software engineer')
+    }
+    // Sibling persona keys survive the retext.
+    expect(readFileSync(join(target, 'minimal', 'agent.cordis.yml'), 'utf8'))
+      .toContain('complete: true')
+  })
+
+  it('retexts nested persona rows and passes malformed compositions through unchanged', () => {
+    const text = [
+      '- id: wrapper',
+      "  name: 'cordis:group'",
+      '  group: true',
+      '  config:',
+      '    - id: persona',
+      "      name: '@deepseek-ai/dsh-persona'",
+      '      config:',
+      '        text: You are a coding agent.',
+      '        complete: true',
+      '',
+    ].join('\n')
+    const rewritten = rewriteDesktopPresetPersona(text)
+    expect(rewritten).toContain(DESKTOP_AGENT_PERSONA)
+    expect(rewritten).toContain('complete: true')
+    expect(rewritten).not.toContain('coding agent')
+
+    const malformed = '- id: [unterminated\n'
+    expect(rewriteDesktopPresetPersona(malformed)).toBe(malformed)
+  })
+
+  it('pins the first-step system prompt to the Chinese office-assistant persona', () => {
+    const home = temporaryHome()
+    const prepared = prepareDesktopProfile(undefined, home, 'darwin')
+    const rows = composeEntries([prepared.patches])
+
+    expect(rows.find(row => row.id === 'system-prompt')).toEqual(expect.objectContaining({
+      config: expect.objectContaining({
+        includeHarnessIdentity: false,
+        persona: DESKTOP_AGENT_PERSONA,
+      }),
+    }))
+  })
+
+  it('strips nested group rows and passes malformed compositions through unchanged', () => {
+    const text = [
+      '- id: wrapper',
+      "  name: 'cordis:group'",
+      '  group: true',
+      '  config:',
+      '    - id: skill-filesystem',
+      "      name: '@deepseek-ai/dsh-skill-filesystem'",
+      '    - id: tool-skill',
+      "      name: '@deepseek-ai/dsh-tool-skill'",
+      '    - id: kept',
+      "      name: 'third-party-plugin'",
+      '',
+    ].join('\n')
+    const stripped = stripLocalSkillCompositionRows(text)
+    expect(stripped).not.toContain('skill-filesystem')
+    expect(stripped).toContain('tool-skill')
+    expect(stripped).toContain('third-party-plugin')
+
+    const malformed = '- id: [unterminated\n'
+    expect(stripLocalSkillCompositionRows(malformed)).toBe(malformed)
+  })
+
+  it('keeps local skill discovery banned while a machine-wide patch may enable tool-skill', () => {
+    const home = temporaryHome()
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: skill-filesystem',
+      '  disabled: false',
+      '- id: tool-skill',
+      '  disabled: false',
+      '- insert:',
+      '    - id: my-local-skills',
+      "      name: '@deepseek-ai/dsh-skill-filesystem'",
+      '',
+    ].join('\n'))
+
+    const prepared = prepareDesktopProfile(undefined, home, 'darwin')
+    const rows = composeEntries([prepared.patches])
+
+    // Non-desktop layers lose every mention of the skill-filesystem identity,
+    // so the row either vanishes entirely or survives only as the desktop
+    // layer's disabled marker; neither can activate local discovery.
+    const filesystem = rows.find(entry => entry.id === 'skill-filesystem')
+    expect(filesystem === undefined || filesystem.disabled === true).toBe(true)
+    expect(rows.map(row => row.id)).not.toContain('my-local-skills')
+    expect(rows.map(row => row.name)).not.toContain('@deepseek-ai/dsh-skill-filesystem')
+
+    // tool-skill is no longer banned: a home patch may enable it as long as
+    // the composed row keeps the canonical package identity.
+    expect(rows.find(entry => entry.id === 'tool-skill')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-tool-skill',
+    }))
+    expect(rows.find(entry => entry.id === 'tool-skill')?.disabled).not.toBe(true)
+  })
+
+  it('points the preset roster at the sanitized root with shipped and user roots excluded', () => {
+    const home = temporaryHome()
+    const prepared = prepareDesktopProfile(undefined, home, 'darwin')
+    const rows = composeEntries([prepared.patches])
+    const presets = rows.find(row => row.id === 'agent-presets')
+
+    expect(presets).toEqual(expect.objectContaining({
+      config: expect.objectContaining({
+        roots: [{ path: join(home, 'profiles', 'desktop', DESKTOP_PRESET_ROOT_DIR), trust: 'system' }],
+        includeShippedRoot: false,
+        includeUserRoot: false,
+      }),
+    }))
+    const root = (presets?.config as { roots: [{ path: string }] }).roots[0].path
+    expect(existsSync(join(root, 'standard', 'agent.cordis.yml'))).toBe(true)
+    expect(existsSync(join(root, 'cordis', 'skills'))).toBe(false)
+  })
+})
+
+describe('server-mediated model access', () => {
+  it('strips model-row rewrites from user and home patch layers', () => {
+    const filtered = filterLlmPatches([
+      // Re-enable attempts on the force-disabled rows are removed outright.
+      { id: 'llm-deepseek', disabled: false },
+      { id: 'ui-settings-models', disabled: false },
+      // Overrides of the pinned rows are removed too.
+      { id: 'llm-pi-ai', config: { providers: { evil: {} } } },
+      { id: 'agent-default-model', config: { provider: 'evil', model: 'x' } },
+      // Name-based references match the same identities.
+      { name: '@deepseek-ai/dsh-llm-pi-ai', disabled: true },
+      { id: 'unrelated', disabled: false },
+      {
+        insert: [
+          { id: 'my-llm', name: '@deepseek-ai/dsh-llm-deepseek' },
+          { id: 'llm-pi-ai', name: '@deepseek-ai/dsh-llm-pi-ai' },
+          { id: 'kept', name: 'third-party-plugin' },
+        ],
+      },
+      {
+        insert: [{
+          id: 'group',
+          name: 'cordis:group',
+          group: true,
+          config: [
+            { id: 'agent-default-model', name: '@deepseek-ai/dsh-agent-default-model' },
+            { id: 'nested-kept', name: 'third-party-nested' },
+          ],
+        }],
+      },
+    ])
+
+    expect(filtered).toEqual([
+      { id: 'unrelated', disabled: false },
+      { insert: [{ id: 'kept', name: 'third-party-plugin' }] },
+      {
+        insert: [{
+          id: 'group',
+          name: 'cordis:group',
+          group: true,
+          config: [{ id: 'nested-kept', name: 'third-party-nested' }],
+        }],
+      },
+    ])
+  })
+
+  it('asserts the composed graph keeps the proxy-only model posture', () => {
+    expect(() => assertEffectiveLlmRows([])).not.toThrow()
+    expect(() => assertEffectiveLlmRows([
+      { id: 'llm-deepseek', name: '@deepseek-ai/dsh-llm-deepseek', disabled: true },
+      { id: 'ui-settings-models', name: '@deepseek-ai/dsh-client-ui-settings-models', disabled: true },
+      { id: 'llm-pi-ai', name: '@deepseek-ai/dsh-llm-pi-ai' },
+      { id: 'agent-default-model', name: '@deepseek-ai/dsh-agent-default-model', config: {} },
+    ])).not.toThrow()
+
+    // The direct adapter and the Models page must stay disabled.
+    expect(() => assertEffectiveLlmRows([
+      { id: 'llm-deepseek', name: '@deepseek-ai/dsh-llm-deepseek', disabled: false },
+    ])).toThrow(/direct model path/)
+    expect(() => assertEffectiveLlmRows([
+      { id: 'ui-settings-models', name: '@deepseek-ai/dsh-client-ui-settings-models' },
+    ])).toThrow(/direct model path/)
+    // The pinned rows must keep their canonical package and stay enabled.
+    expect(() => assertEffectiveLlmRows([
+      { id: 'llm-pi-ai', name: 'evil-llm-adapter' },
+    ])).toThrow(/pinned model row/)
+    expect(() => assertEffectiveLlmRows([
+      { id: 'llm-pi-ai', name: '@deepseek-ai/dsh-llm-pi-ai', disabled: true },
+    ])).toThrow(/pinned model row/)
+    expect(() => assertEffectiveLlmRows([
+      { id: 'agent-default-model', name: 'evil-default-model' },
+    ])).toThrow(/pinned model row/)
+    // A second mount of a pinned package under another id is a hijack.
+    expect(() => assertEffectiveLlmRows([
+      { id: 'my-llm', name: '@deepseek-ai/dsh-llm-pi-ai' },
+    ])).toThrow(/pinned model row/)
+    // Groups are checked recursively.
+    expect(() => assertEffectiveLlmRows([{
+      id: 'group',
+      name: 'cordis:group',
+      group: true,
+      config: [{ id: 'llm-deepseek', name: '@deepseek-ai/dsh-llm-deepseek' }],
+    }])).toThrow(/direct model path/)
+  })
+
+  it('keeps model rows server-mediated when a machine-wide patch tries to rewrite them', () => {
+    const home = temporaryHome()
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: llm-deepseek',
+      '  disabled: false',
+      '- id: ui-settings-models',
+      '  disabled: false',
+      '- id: llm-pi-ai',
+      '  config:',
+      '    providers:',
+      '      evil:',
+      '        api: openai-completions',
+      '        baseURL: https://evil.example/v1',
+      '        models:',
+      '          - id: evil-1',
+      '- id: agent-default-model',
+      '  config:',
+      '    provider: evil',
+      '    model: evil-1',
+      '- insert:',
+      '    - id: my-deepseek',
+      "      name: '@deepseek-ai/dsh-llm-deepseek'",
+      '',
+    ].join('\n'))
+
+    const prepared = prepareDesktopProfile(undefined, home, 'darwin')
+    const rows = composeEntries([prepared.patches])
+
+    // Non-desktop layers lose every mention of these identities: the direct
+    // adapter and the Models page survive only as disabled rows, and the
+    // pinned rows keep their canonical package with untouched configuration.
+    const llmDeepseek = rows.find(entry => entry.id === 'llm-deepseek')
+    expect(llmDeepseek?.disabled).toBe(true)
+    const modelsPage = rows.find(entry => entry.id === 'ui-settings-models')
+    expect(modelsPage?.disabled).toBe(true)
+    const piAi = rows.find(entry => entry.id === 'llm-pi-ai')
+    expect(piAi?.name).toBe('@deepseek-ai/dsh-llm-pi-ai')
+    expect(piAi?.config).toBeUndefined()
+    const defaultModel = rows.find(entry => entry.id === 'agent-default-model')
+    expect(defaultModel?.name).toBe('@deepseek-ai/dsh-agent-default-model')
+    expect(defaultModel?.config).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    expect(rows.map(row => row.id)).not.toContain('my-deepseek')
+  })
+
+  it('pins the default model row to the server-resolved selection', () => {
+    const home = temporaryHome()
+    const prepared = prepareDesktopProfile(
+      undefined,
+      home,
+      'darwin',
+      'desktop',
+      undefined,
+      undefined,
+      undefined,
+      { defaultModel: { provider: 'acme', model: 'acme-large' } },
+    )
+    const rows = composeEntries([prepared.patches])
+    const defaultModel = rows.find(entry => entry.id === 'agent-default-model')
+    expect(defaultModel?.config).toEqual({ provider: 'acme', model: 'acme-large' })
   })
 })

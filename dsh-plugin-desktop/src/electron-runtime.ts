@@ -62,6 +62,7 @@ import { ElectronWorkspaceAdmission } from './workspace-admission.ts'
 import { ProfileCreateWindow, type ProfileCreateWindowOptions } from './profile-create-window.ts'
 import { windowsBuildNumber } from './window-material.ts'
 import { desktopNativeCopy } from './native-dialog-copy.ts'
+import { currentBrand } from './brand.ts'
 import {
   FileMainWindowStateStore,
   type MainWindowStateStore,
@@ -376,6 +377,33 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   }
 
   /** @inheritdoc */
+  minimizeWindow(): void {
+    this.windowControlGeneration().minimizeWindow()
+  }
+
+  /** @inheritdoc */
+  toggleWindowMaximize(): boolean {
+    return this.windowControlGeneration().toggleWindowMaximize()
+  }
+
+  /** @inheritdoc */
+  closeWindow(): void {
+    this.windowControlGeneration().closeWindow()
+  }
+
+  /** @inheritdoc */
+  isWindowMaximized(): boolean {
+    return this.generation?.isWindowMaximized() ?? false
+  }
+
+  private windowControlGeneration(): ElectronShellGeneration {
+    if (this.generation === undefined) {
+      throw new Error('dsh-plugin-desktop: window controls require an active shell generation')
+    }
+    return this.generation
+  }
+
+  /** @inheritdoc */
   exportDiagnostics(): Promise<void> {
     if (this.diagnosticExport !== undefined) return this.diagnosticExport
     const operation = this.performDiagnosticExport().finally(() => {
@@ -458,6 +486,17 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (this.quitting) return
     if (this.restartRequest !== undefined) return await this.restartRequest
     const request = this.confirmAndRestart('normal').finally(() => {
+      if (this.restartRequest === request) this.restartRequest = undefined
+    })
+    this.restartRequest = request
+    await request
+  }
+
+  /** @inheritdoc */
+  async requestSignOutRestart(): Promise<void> {
+    if (this.quitting) return
+    if (this.restartRequest !== undefined) return await this.restartRequest
+    const request = this.restart().finally(() => {
       if (this.restartRequest === request) this.restartRequest = undefined
     })
     this.restartRequest = request
@@ -819,7 +858,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const profiles = this.contributedTrayItems('profiles')
     const status = this.contributedTrayItems('status')
     const template: Electron.MenuItemConstructorOptions[] = [
-      { label: desktopTrayLabel(this.locale, 'openDesktop', spec.productName), click: show },
+      { label: desktopTrayLabel(this.locale, 'openDesktop', currentBrand().name), click: show },
     ]
     if (tools.length > 0) template.push({ type: 'separator' }, ...tools)
     if (profiles.length > 0) template.push({ type: 'separator' }, ...profiles)

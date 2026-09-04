@@ -2,7 +2,6 @@ import { unlinkSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopShellSpec } from '../src/runtime.ts'
-import { DESKTOP_FRAME_HEIGHT } from '../src/window-chrome.ts'
 
 const terminal = vi.hoisted(() => ({ open: vi.fn() }))
 const diagnostics = vi.hoisted(() => ({ export: vi.fn() }))
@@ -138,6 +137,12 @@ const electron = vi.hoisted(() => {
     readonly isVisible = vi.fn(() => false)
     readonly isMinimized = vi.fn(() => false)
     readonly isFullScreen = vi.fn(() => false)
+    maximizedState = false
+    readonly minimize = vi.fn()
+    readonly maximize = vi.fn(() => { this.maximizedState = true })
+    readonly unmaximize = vi.fn(() => { this.maximizedState = false })
+    readonly isMaximized = vi.fn(() => this.maximizedState)
+    readonly close = vi.fn()
     readonly getNormalBounds = vi.fn(() => ({ x: 120, y: 80, width: 1280, height: 840 }))
     readonly flashFrame = vi.fn()
     readonly restore = vi.fn()
@@ -325,7 +330,7 @@ describe('Electron desktop runtime', () => {
     updater.download.mockReset()
     updater.filename.mockReset()
     updater.filename.mockImplementation((platform: string, version: string) => (
-      `DSH-Desktop-${version}-${platform === 'darwin' ? 'mac.dmg' : 'windows.exe'}`
+      `gs-worker-${version}-${platform === 'darwin' ? 'mac.dmg' : 'windows.exe'}`
     ))
     updater.pending.mockReset()
     updater.pending.mockResolvedValue(undefined)
@@ -970,7 +975,7 @@ describe('Electron desktop runtime', () => {
     expect(runtime.locale).toBe('zh')
     expect((electron.menuTemplates.at(-1) as Array<{ label?: string }>).map(item => item.label))
       .toEqual(expect.arrayContaining([
-        '打开 DSH Desktop',
+        '打开 办公 Agent',
         '切换到扩展窗口',
         '退出',
       ]))
@@ -979,7 +984,7 @@ describe('Electron desktop runtime', () => {
     expect(runtime.locale).toBe('en')
     expect((electron.menuTemplates.at(-1) as Array<{ label?: string }>).map(item => item.label))
       .toEqual(expect.arrayContaining([
-        'Open DSH Desktop',
+        'Open 办公 Agent',
         'Switch to Extended Window',
         'Quit',
       ]))
@@ -989,7 +994,7 @@ describe('Electron desktop runtime', () => {
     expect(runtime.locale).toBe('zh')
     expect((electron.menuTemplates.at(-1) as Array<{ label?: string }>).map(item => item.label))
       .toEqual(expect.arrayContaining([
-        '打开 DSH Desktop',
+        '打开 办公 Agent',
         '切换到扩展窗口',
         '退出',
       ]))
@@ -1481,7 +1486,7 @@ describe('Electron desktop runtime', () => {
 
     const labels = (electron.menuTemplates.at(-1) as Array<{ label?: string }>).map(item => item.label)
     expect(labels).toEqual([
-      'Open DSH Desktop', undefined,
+      'Open 办公 Agent', undefined,
       'Earlier Tool', 'Later Tool', undefined,
       'Check for Updates…', undefined,
       'Switch to Extended Window', undefined,
@@ -1742,7 +1747,7 @@ describe('Electron desktop runtime', () => {
       title: 'Plugin Load Failed',
       message: 'Some plugins could not be loaded.',
       detail: expect.stringContaining('dsh-vision-router'),
-      buttons: ['Open DSH Terminal', 'Restart DSH Desktop', 'Dismiss'],
+      buttons: ['Open DSH Terminal', 'Restart 办公 Agent', 'Dismiss'],
     }))
     const recoveryCalls = electron.dialog.showMessageBox.mock.calls as unknown as Array<[{ detail?: string }]>
     expect(recoveryCalls[0]?.[0].detail).toContain('vision_crop')
@@ -1838,13 +1843,26 @@ describe('Electron desktop runtime', () => {
 
     expect(restart).not.toHaveBeenCalled()
     expect(electron.dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'question', title: 'Restart DSH Desktop', buttons: ['Restart', 'Cancel'], defaultId: 1, cancelId: 1,
+      type: 'question', title: 'Restart 办公 Agent', buttons: ['Restart', 'Cancel'], defaultId: 1, cancelId: 1,
     }))
 
     electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 0, checkboxChecked: false })
     await runtime.requestRestart()
     expect(restart).toHaveBeenCalledOnce()
     expect(restart).toHaveBeenCalledWith(undefined)
+  })
+
+  it('restarts without another confirmation after sign-out', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const restart = vi.fn(async (_target?: 'recovery') => {})
+    const runtime = new ElectronDesktopRuntime(restart)
+
+    await runtime.requestSignOutRestart()
+
+    expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(restart).toHaveBeenCalledOnce()
+    expect(restart).toHaveBeenCalledWith()
   })
 
   it('requires a distinct confirmation before restarting into recovery mode', async () => {
@@ -1867,7 +1885,7 @@ describe('Electron desktop runtime', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const response = Response.json({ version: '2.1.0' })
     electron.net.fetch.mockResolvedValueOnce(response)
-    updater.download.mockResolvedValueOnce('/tmp/DSH-Desktop-2.1.0-mac.dmg')
+    updater.download.mockResolvedValueOnce('/tmp/gs-worker-2.1.0-mac.dmg')
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
     const release = runtime.schedule(spec)
@@ -1893,7 +1911,7 @@ describe('Electron desktop runtime', () => {
     expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(
       activeWindow,
       expect.objectContaining({
-        title: 'DSH Desktop Is Up to Date',
+        title: '办公 Agent Is Up to Date',
         detail: 'Installed version: 2.0.0',
         buttons: ['OK'],
       }),
@@ -1917,33 +1935,33 @@ describe('Electron desktop runtime', () => {
     const controller = new AbortController()
     electron.dialog.showSaveDialog.mockResolvedValueOnce({
       canceled: false,
-      filePath: '/tmp/Downloads/DSH-Desktop-2.1.0-mac.dmg',
+      filePath: '/tmp/Downloads/gs-worker-2.1.0-mac.dmg',
     })
     await runtime.updates.downloadAndOpen('2.1.0', controller.signal)
     expect(electron.dialog.showSaveDialog).toHaveBeenCalledWith(
       activeWindow,
       expect.objectContaining({
-        defaultPath: join('/tmp/Downloads', 'DSH-Desktop-2.1.0-mac.dmg'),
+        defaultPath: join('/tmp/Downloads', 'gs-worker-2.1.0-mac.dmg'),
         filters: [{ name: 'Disk Image', extensions: ['dmg'] }],
       }),
     )
     expect(updater.download).toHaveBeenCalledWith({
       platform: 'darwin',
       version: '2.1.0',
-      destinationPath: '/tmp/Downloads/DSH-Desktop-2.1.0-mac.dmg',
+      destinationPath: '/tmp/Downloads/gs-worker-2.1.0-mac.dmg',
       request: expect.any(Function),
       signal: controller.signal,
     })
-    expect(electron.shell.openPath).toHaveBeenCalledWith('/tmp/DSH-Desktop-2.1.0-mac.dmg')
+    expect(electron.shell.openPath).toHaveBeenCalledWith('/tmp/gs-worker-2.1.0-mac.dmg')
     expect(updater.record).toHaveBeenCalledWith('/tmp/dsh-desktop-user-data', {
       platform: 'darwin',
       version: '2.1.0',
-      path: '/tmp/DSH-Desktop-2.1.0-mac.dmg',
+      path: '/tmp/gs-worker-2.1.0-mac.dmg',
     })
     expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(
       activeWindow,
       expect.objectContaining({
-        title: 'DSH Desktop Update Downloaded',
+        title: '办公 Agent Update Downloaded',
         buttons: ['OK'],
       }),
     )
@@ -2233,8 +2251,10 @@ describe('Electron desktop runtime', () => {
 
     expect(electron.browserWindowOptions[0]).toEqual(expect.objectContaining({
       backgroundColor: '#202124',
-      titleBarOverlay: expect.objectContaining({ height: DESKTOP_FRAME_HEIGHT }),
+      frame: false,
     }))
+    expect(electron.browserWindowOptions[0]).not.toHaveProperty('titleBarStyle')
+    expect(electron.browserWindowOptions[0]).not.toHaveProperty('titleBarOverlay')
     expect(electron.browserWindowOptions[0]).not.toHaveProperty('transparent')
     expect(electron.browserWindowOptions[0]).not.toHaveProperty('backgroundMaterial')
     expect(electron.menuTemplates[0]).toEqual(expect.arrayContaining([
@@ -2242,6 +2262,33 @@ describe('Electron desktop runtime', () => {
     ]))
 
     await release()
+  })
+
+  it('drives the mounted window through the private window-control surface', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+
+    expect(runtime.isWindowMaximized()).toBe(false)
+    expect(() => runtime.minimizeWindow()).toThrow('window controls require an active shell generation')
+
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const window = electron.browserWindows[0]
+
+    runtime.minimizeWindow()
+    expect(window?.minimize).toHaveBeenCalledOnce()
+    expect(runtime.isWindowMaximized()).toBe(false)
+    expect(runtime.toggleWindowMaximize()).toBe(true)
+    expect(window?.maximize).toHaveBeenCalledOnce()
+    expect(runtime.isWindowMaximized()).toBe(true)
+    expect(runtime.toggleWindowMaximize()).toBe(false)
+    expect(window?.unmaximize).toHaveBeenCalledOnce()
+    runtime.closeWindow()
+    expect(window?.close).toHaveBeenCalledOnce()
+
+    await release()
+    expect(runtime.isWindowMaximized()).toBe(false)
   })
 
   it('does not install a native backdrop when Windows material is off', async () => {

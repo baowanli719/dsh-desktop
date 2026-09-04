@@ -147,6 +147,18 @@ try {
       host.provide('desktopBrowserAccess', BROWSER_ACCESS)
       host.provide('desktopLanHttps', LAN_HTTPS)
       host.provide('desktopRuntime', runtime)
+      // Signed-out gsclaw-server stub: the server skill provider must boot
+      // headlessly and list an empty catalog without a session.
+      host.provide('gsServer', {
+        userDataDir: join(prepared.homeDir, 'userdata'),
+        endpoints: { resolve: () => 'http://127.0.0.1:18300/gsclaw' },
+        auth: {
+          accessToken: () => undefined,
+          async refreshAccessToken() { throw new Error('no session') },
+        },
+        config: { subscribe: () => () => {} },
+        clientConfig: () => undefined,
+      })
       host.provide('desktopPnpmBootstrap', {
         activeProfileName: 'desktop',
         activeProfileDir: prepared.profile.dir,

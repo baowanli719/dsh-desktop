@@ -59,6 +59,7 @@ export function compatibilityWindowOptions(
     return customChromeWindowOptions(spec, icon, platform, preload, {
       titlebarHeight: DESKTOP_FRAME_HEIGHT,
       macosTrafficLightTop: DESKTOP_FRAME_MACOS_TRAFFIC_LIGHT_TOP,
+      windowsFrameless: true,
     })
   }
   const options = baseWindowOptions(spec, icon, platform, preload)
@@ -85,6 +86,7 @@ export function advancedWindowOptions(
   return customChromeWindowOptions(spec, icon, platform, preload, {
     titlebarHeight: ADVANCED_WINDOWS_TITLEBAR_HEIGHT,
     macosTrafficLightTop: ADVANCED_MACOS_TRAFFIC_LIGHT_TOP,
+    windowsFrameless: false,
   })
 }
 
@@ -101,12 +103,15 @@ export function extendedWindowOptions(
   return customChromeWindowOptions(spec, icon, platform, preload, {
     titlebarHeight: DESKTOP_FRAME_HEIGHT,
     macosTrafficLightTop: DESKTOP_FRAME_MACOS_TRAFFIC_LIGHT_TOP,
+    windowsFrameless: true,
   })
 }
 
 interface CustomChromeGeometry {
   readonly titlebarHeight: number
   readonly macosTrafficLightTop: number
+  /** frame:false with renderer-drawn caption buttons instead of the native Windows overlay. */
+  readonly windowsFrameless: boolean
 }
 
 function customChromeWindowOptions(
@@ -138,15 +143,20 @@ function customChromeWindowOptions(
       && spec.material === 'mica'
       ? 'mica' as const
       : undefined
+    const caption: BrowserWindowConstructorOptions = geometry.windowsFrameless
+      ? { frame: false }
+      : {
+          titleBarStyle: 'hidden',
+          titleBarOverlay: {
+            color: '#00000000',
+            symbolColor: '#7f858f',
+            height: geometry.titlebarHeight,
+          },
+        }
     return {
       ...options,
       autoHideMenuBar: true,
-      titleBarStyle: 'hidden',
-      titleBarOverlay: {
-        color: '#00000000',
-        symbolColor: '#7f858f',
-        height: geometry.titlebarHeight,
-      },
+      ...caption,
       ...(systemMaterial === undefined ? {} : { backgroundColor: '#00000000' }),
       ...(systemMaterial === undefined ? {} : { backgroundMaterial: systemMaterial }),
       hasShadow: true,

@@ -161,7 +161,7 @@ export function desktopUpdateFilename(platform: DesktopDownloadPlatform, version
   validatedVersion(version)
   const extension = platform === 'darwin' ? 'dmg' : 'exe'
   const platformName = platform === 'darwin' ? 'mac' : 'windows'
-  return `DSH-Desktop-${version}-${platformName}.${extension}`
+  return `gs-worker-${version}-${platformName}.${extension}`
 }
 
 /** Remember a downloaded installer until an upgraded application resolves its retention. */

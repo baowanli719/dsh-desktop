@@ -5,6 +5,7 @@ import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
+import { currentBrand, interpolateBrand } from './brand.ts'
 import type { DesktopLocale, DesktopNotification } from './runtime.ts'
 
 export const name = 'desktop-notifications'
@@ -35,21 +36,26 @@ type NotificationOutcome = 'turn-completed' | 'turn-failed' | 'job-completed' | 
 const NOTIFICATION_COPY: Record<DesktopLocale, Record<NotificationOutcome, DesktopNotification>> = {
   en: {
     'turn-completed': { title: 'User Turn Completed', body: 'A user-initiated turn has finished.' },
-    'turn-failed': { title: 'User Turn Failed', body: 'A user-initiated turn could not finish. Open DSH Desktop for details.' },
+    'turn-failed': { title: 'User Turn Failed', body: 'A user-initiated turn could not finish. Open {brand} for details.' },
     'job-completed': { title: 'Background Job Completed', body: 'A background job has finished.' },
-    'job-failed': { title: 'Background Job Failed', body: 'A background job could not finish. Open DSH Desktop for details.' },
+    'job-failed': { title: 'Background Job Failed', body: 'A background job could not finish. Open {brand} for details.' },
   },
   zh: {
     'turn-completed': { title: '用户回合已完成', body: '一个由你发起的回合已完成。' },
-    'turn-failed': { title: '用户回合失败', body: '一个由你发起的回合未能完成，请打开 DSH Desktop 查看详情。' },
+    'turn-failed': { title: '用户回合失败', body: '一个由你发起的回合未能完成，请打开 {brand} 查看详情。' },
     'job-completed': { title: '后台任务已完成', body: '有一个后台任务已结束。' },
-    'job-failed': { title: '后台任务失败', body: '一个后台任务未能完成，请打开 DSH Desktop 查看详情。' },
+    'job-failed': { title: '后台任务失败', body: '一个后台任务未能完成，请打开 {brand} 查看详情。' },
   },
 }
 
 interface OpenTurn {
   readonly turn: number
   userInitiated: boolean
+}
+
+/** Resolve one outcome's copy against the effective brand. */
+function notificationCopy(locale: DesktopLocale, outcome: NotificationOutcome): DesktopNotification {
+  return interpolateBrand(NOTIFICATION_COPY[locale][outcome], currentBrand().name)
 }
 
 function notifyJob(
@@ -59,9 +65,9 @@ function notifyJob(
 ): void {
   if (!settings.enabled) return
   if (snapshot.status === 'completed' && settings.notifyOnJobCompletion) {
-    runtime.notifyAttention(NOTIFICATION_COPY[runtime.locale]['job-completed'])
+    runtime.notifyAttention(notificationCopy(runtime.locale, 'job-completed'))
   } else if (snapshot.status === 'failed' && settings.notifyOnJobFailure) {
-    runtime.notifyAttention(NOTIFICATION_COPY[runtime.locale]['job-failed'])
+    runtime.notifyAttention(notificationCopy(runtime.locale, 'job-failed'))
   }
 }
 
@@ -94,9 +100,9 @@ function trackTurn(
 
   const reason = event.data.reason.kind
   if (reason === 'completed' && settings.notifyOnTurnCompletion) {
-    runtime.notifyAttention(NOTIFICATION_COPY[runtime.locale]['turn-completed'])
+    runtime.notifyAttention(notificationCopy(runtime.locale, 'turn-completed'))
   } else if ((reason === 'error' || reason === 'max-tokens') && settings.notifyOnTurnFailure) {
-    runtime.notifyAttention(NOTIFICATION_COPY[runtime.locale]['turn-failed'])
+    runtime.notifyAttention(notificationCopy(runtime.locale, 'turn-failed'))
   }
 }
 

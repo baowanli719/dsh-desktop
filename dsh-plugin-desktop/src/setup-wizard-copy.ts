@@ -1,5 +1,6 @@
 /** Bilingual copy for the pre-Host native Setup Wizard. */
 
+import { currentBrand, interpolateBrand } from './brand.ts'
 import type { DesktopLocale } from './runtime.ts'
 
 export interface DesktopSetupWizardCopy {
@@ -76,14 +77,14 @@ export interface DesktopSetupWizardCopy {
 const COPY: Record<DesktopLocale, DesktopSetupWizardCopy> = {
   en: {
     beta: 'Beta',
-    title: 'Set up DSH Desktop',
+    title: 'Set up {brand}',
     profile: 'Profile',
-    welcomeTitle: 'Welcome to DSH Desktop',
+    welcomeTitle: 'Welcome to {brand}',
     welcomeBody: 'This wizard configures the Desktop experience for the Profile shown below.',
     firstProfileSetup: 'This is the first time you are setting up Desktop mode for this Profile.',
     startSetup: 'Start setup',
     presentationTitle: 'Choose a window mode',
-    presentationBody: 'Choose how DSH Desktop presents the official client.',
+    presentationBody: 'Choose how {brand} presents the official client.',
     compatibilityMode: 'Compatibility mode',
     compatibilityModeBody: 'Keep the official client layout for the broadest compatibility.',
     extendedMode: 'Extended window',
@@ -122,7 +123,7 @@ const COPY: Record<DesktopLocale, DesktopSetupWizardCopy> = {
     marketDisabled: 'Do not enable a plugin market',
     marketDisabledBody: 'Keep plugin market features turned off.',
     communityMarket: 'dsh-community-market',
-    communityMarketBody: 'The open market built into DSH Desktop, including custom data sources.',
+    communityMarketBody: 'The open market built into {brand}, including custom data sources.',
     dshMarket: 'dsh-market',
     dshMarketBody: 'The popular community market powered by awesome-dsh-plugin data.',
     notificationsTitle: 'Set up Desktop notifications',
@@ -140,20 +141,20 @@ const COPY: Record<DesktopLocale, DesktopSetupWizardCopy> = {
     cancelSkip: 'Continue setup',
     confirmSkip: 'Skip setup',
     successTitle: 'Setup complete',
-    successBody: 'DSH Desktop is ready for this Profile.',
-    startUsing: 'Start using DSH Desktop',
+    successBody: '{brand} is ready for this Profile.',
+    startUsing: 'Start using {brand}',
     invalidState: 'Setup information could not be loaded. Close this window and try again.',
   },
   zh: {
     beta: 'Beta',
-    title: '设置 DSH Desktop',
+    title: '设置{brand}',
     profile: 'Profile',
-    welcomeTitle: '欢迎设置 DSH Desktop',
+    welcomeTitle: '欢迎设置{brand}',
     welcomeBody: '此向导将为下方 Profile 配置桌面体验。',
     firstProfileSetup: '这是您第一次为这个 Profile 设置桌面模式。',
     startSetup: '开始设置',
     presentationTitle: '选择窗口模式',
-    presentationBody: '选择 DSH Desktop 如何呈现官方客户端。',
+    presentationBody: '选择{brand} 如何呈现官方客户端。',
     compatibilityMode: '兼容模式',
     compatibilityModeBody: '保留官方客户端布局，兼容性最好。',
     extendedMode: '扩展窗口',
@@ -192,7 +193,7 @@ const COPY: Record<DesktopLocale, DesktopSetupWizardCopy> = {
     marketDisabled: '不启用插件市场',
     marketDisabledBody: '保持插件市场功能关闭。',
     communityMarket: 'dsh-community-market',
-    communityMarketBody: 'DSH Desktop 内置的开放市场，并支持自定义数据源。',
+    communityMarketBody: '{brand} 内置的开放市场，并支持自定义数据源。',
     dshMarket: 'dsh-market',
     dshMarketBody: '使用 awesome-dsh-plugin 数据的热门社区市场。',
     notificationsTitle: '设置桌面通知',
@@ -210,12 +211,13 @@ const COPY: Record<DesktopLocale, DesktopSetupWizardCopy> = {
     cancelSkip: '继续设置',
     confirmSkip: '确认跳过',
     successTitle: '设置成功',
-    successBody: '这个 Profile 的 DSH Desktop 已准备就绪。',
+    successBody: '这个 Profile 的{brand} 已准备就绪。',
     startUsing: '开始使用',
     invalidState: '无法加载设置信息。请关闭此窗口后重试。',
   },
 }
 
-export function desktopSetupWizardCopy(locale: DesktopLocale): DesktopSetupWizardCopy {
-  return COPY[locale]
+/** Resolve the Setup Wizard copy for one locale against the effective brand. */
+export function desktopSetupWizardCopy(locale: DesktopLocale, brand = currentBrand().name): DesktopSetupWizardCopy {
+  return interpolateBrand(COPY[locale], brand)
 }

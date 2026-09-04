@@ -43,6 +43,14 @@
       "types": "./lib/types/terminal.d.ts",
       "default": "./lib/terminal.js"
     },
+    "./server-skill-provider": {
+      "types": "./lib/types/server-skill-provider.d.ts",
+      "default": "./lib/server-skill-provider.js"
+    },
+    "./prompt-language": {
+      "types": "./lib/types/prompt-language.d.ts",
+      "default": "./lib/prompt-language.js"
+    },
     "./pnpm": {
       "types": "./lib/types/pnpm.d.ts",
       "default": "./lib/pnpm.js"
@@ -76,7 +84,6 @@
   "files": [
     "build/app-icon.png",
     "build/app-icon-mac.png",
-    "build/tray-icon.svg",
     "build/tray-icon*.png",
     "cordis.patch.yml",
     "docs/**",
@@ -98,8 +105,11 @@
         "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-input-trigger",
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-general",
         "@deepseek-ai/dsh-client-ui-theme"
       ],
       "platform": "web"
@@ -167,13 +177,16 @@
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-directory-picker-browse": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-directory-picker-native": "0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-goal": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-input-trigger": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-layout": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-session": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-settings": "0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-settings-general": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-sidebar": "0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-skill": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-theme": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-tool": "0.1.2-alpha.1",
@@ -268,7 +281,9 @@
     "@deepseek-ai/dsh-workflow": "0.1.2-alpha.1",
     "@deepseek-ai/dsh-workspace": "0.1.2-alpha.1",
     "@deepseek-ai/schemastery": "^3.18.1",
+    "@huanlin/dsh-plugin-better-sidebar-plugin-office": "0.1.2",
     "adm-zip": "^0.6.0",
+    "dsh-better-sidebar": "0.17.1",
     "dsh-community-market": "0.1.0-dev.0",
     "dshmarket": "1.17.1",
     "koffi": "3.1.5",
@@ -311,8 +326,8 @@
     "vitest": "4.1.8"
   },
   "build": {
-    "appId": "ai.deepseek.dsh.desktop",
-    "productName": "DSH Desktop",
+    "appId": "com.enterprise.officeagent",
+    "productName": "gs-worker",
     "asar": true,
     "asarUnpack": [
       "package.json",
@@ -335,12 +350,12 @@
     "files": [
       "build/app-icon.png",
       "build/app-icon-mac.png",
-      "build/tray-icon.svg",
       "build/tray-icon*.png",
       "cordis.patch.yml",
       "lib/**",
       "package.json",
-      "!node_modules/node-pty/build/**"
+      "!node_modules/node-pty/build/**",
+      "!node_modules/@univerjs-pro/**"
     ],
     "mac": {
       "target": [
@@ -373,12 +388,11 @@
           ]
         }
       ],
-      "artifactName": "DSH-Desktop-${version}-${arch}-Portable.${ext}",
+      "artifactName": "gs-worker-${version}-${arch}-Portable.${ext}",
       "icon": "build/app-icon.png"
     },
     "nsis": {
       "include": "installer.nsh",
-      "license": "THIRD_PARTY_NOTICES.md",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": true,
@@ -386,9 +400,9 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "differentialPackage": false,
-      "shortcutName": "DSH Desktop",
+      "shortcutName": "gs-worker",
       "useZip": false,
-      "artifactName": "DSH-Desktop-${version}-${arch}-Setup.${ext}"
+      "artifactName": "gs-worker-${version}-${arch}-Setup.${ext}"
     },
     "linux": {
       "target": [

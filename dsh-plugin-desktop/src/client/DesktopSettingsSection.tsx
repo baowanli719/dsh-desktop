@@ -8,6 +8,10 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import type {
   DesktopMarketProvider, DesktopProfileView, DesktopSettingsApi, DesktopSettingsView,
 } from './desktop-settings-api.ts'
+import type { DesktopGsAccountApi } from './gs-account-api.ts'
+import type { DesktopGsBrandApi } from './gs-brand-api.ts'
+import type { GsBrandView, GsSessionView } from '../server/gs-contract.ts'
+import { GS_BRAND_DEFAULT } from '../brand.ts'
 import type { DesktopSettingsLocaleKey } from './desktop-settings-locales.ts'
 import type { DesktopClientPlatform } from './environment.ts'
 import {
@@ -24,6 +28,8 @@ export interface DesktopShellSettings {
   readonly openBrowser: boolean
   readonly networkExposure: 'loopback' | 'lan'
   readonly logLevel: 'debug' | 'info' | 'warn' | 'error'
+  /** Whether the session header shows the upstream session-log export action. */
+  readonly sessionLogButton: boolean
 }
 
 /** Browser view of the Host `dsh-desktop-notifications` settings namespace. */
@@ -38,6 +44,8 @@ export interface DesktopNotificationSettings {
 /** Registration-side business face for the Desktop settings section. */
 export interface DesktopSettingsSectionInjected {
   readonly api: DesktopSettingsApi
+  readonly gsAccount: DesktopGsAccountApi
+  readonly gsBrand: DesktopGsBrandApi
   readonly platform: DesktopClientPlatform
   readonly initialMode: DesktopShellSettings['mode']
   readonly micaSupported: boolean
@@ -53,7 +61,7 @@ export type DesktopSettingsSectionProps =
   & InjectFace<DesktopSettingsSectionInjected>
 
 type Translate = DesktopSettingsSectionProps['t']
-type BusyOperation = 'load' | 'create-profile' | 'select-profile' | 'delete-profile' | 'select-market' | 'mode' | 'material' | 'web' | 'notification'
+type BusyOperation = 'load' | 'create-profile' | 'select-profile' | 'delete-profile' | 'select-market' | 'mode' | 'material' | 'web' | 'notification' | 'logout' | 'session-log'
 type RestartState = 'none' | 'restarting' | 'required'
 type LanPollWait = (signal: AbortSignal) => Promise<void>
 
@@ -300,8 +308,10 @@ function marketBody(option: (typeof MARKET_OPTIONS)[number], t: Translate): Reac
 
 /** Render the Desktop settings page. */
 export function DesktopSettingsSection({
-  t,
+  t: translate,
   api,
+  gsAccount,
+  gsBrand,
   platform,
   initialMode,
   micaSupported,
@@ -312,6 +322,9 @@ export function DesktopSettingsSection({
   const desktop = useScope(desktopSettings)
   const notifications = useScope(notificationSettings)
   const [view, setView] = useState<DesktopSettingsView>()
+  const [session, setSession] = useState<GsSessionView>()
+  const [sessionFailed, setSessionFailed] = useState(false)
+  const [brand, setBrand] = useState<GsBrandView>()
   const [profileName, setProfileName] = useState('')
   const [busy, setBusy] = useState<BusyOperation | undefined>('load')
   const [loadFailed, setLoadFailed] = useState(false)
@@ -347,6 +360,26 @@ export function DesktopSettingsSection({
 
   useEffect(() => { void load() }, [load])
   useEffect(() => () => { lanPoll.current?.abort() }, [])
+  useEffect(() => {
+    let cancelled = false
+    gsBrand.readBrand()
+      .then((value) => { if (!cancelled) setBrand(value) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [gsBrand])
+  // Every dictionary string with a {brand} placeholder resolves against the
+  // server-delivered brand; before the fetch lands the built-in default speaks.
+  const t = useCallback<Translate>(
+    key => translate(key).replaceAll('{brand}', brand?.name ?? GS_BRAND_DEFAULT.name),
+    [translate, brand],
+  )
+  useEffect(() => {
+    let cancelled = false
+    gsAccount.readSession()
+      .then((value) => { if (!cancelled) setSession(value) })
+      .catch(() => { if (!cancelled) setSessionFailed(true) })
+    return () => { cancelled = true }
+  }, [gsAccount])
   useEffect(() => {
     if (restart !== 'restarting') return
     const timer = setTimeout(() => { setRestart('required') }, 8_000)
@@ -448,6 +481,13 @@ export function DesktopSettingsSection({
     void run('notification', async () => { await notificationSettings.set(field, checked) })
   }
 
+  const logout = (): void => {
+    void run('logout', async () => {
+      await gsAccount.logout()
+      setSession(current => current === undefined ? current : { status: 'signed-out', endpoint: current.endpoint })
+    })
+  }
+
   const setBrowserAccess = (checked: boolean): void => {
     void run('web', async () => {
       if (checked) {
@@ -479,6 +519,46 @@ export function DesktopSettingsSection({
           {t(restart === 'restarting' ? 'restarting' : 'restartRequired')}
         </p>
       )}
+
+      <section className="dshDesktopSettingsGroup" aria-labelledby="dsh-desktop-account-title">
+        <div>
+          <h3 id="dsh-desktop-account-title">{t('accountTitle')}</h3>
+          <p className="dshDesktopSettingsGroupIntro">{t('accountIntro')}</p>
+        </div>
+        {sessionFailed && session === undefined && (
+          <p className="dshDesktopSettingsError" role="alert">{t('accountUnavailable')}</p>
+        )}
+        {session?.status === 'signed-in' && session.user !== undefined && (
+          <div className="dshDesktopSettingsList">
+            <div className="dshDesktopSettingsChoice">
+              <span className="dshDesktopSettingsChoiceCopy">
+                <span className="dshDesktopSettingsChoiceTitle">
+                  {session.user.displayName}
+                  <span className="dshDesktopSettingsBadge">{t('accountSignedInAs')}</span>
+                </span>
+                <span className="dshDesktopSettingsChoiceBody">
+                  {session.user.username} · {t('accountServer')}: <code>{session.endpoint}</code>
+                </span>
+              </span>
+              <div className="dshDesktopSettingsChoiceAside">
+                <button
+                  type="button"
+                  className="dshDesktopSettingsButton dshDesktopSettingsButtonDanger"
+                  disabled={busy !== undefined}
+                  onClick={logout}
+                >
+                  {busy === 'logout' ? t('accountLoggingOut') : t('accountLogout')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {session?.status === 'signed-out' && (
+          <p className="dshDesktopSettingsNotice" role="status">
+            {t('accountSignedOut')} · {t('accountSignedOutHint')}
+          </p>
+        )}
+      </section>
 
       <section className="dshDesktopSettingsGroup" aria-labelledby="dsh-desktop-profile-title">
         <div>
@@ -662,6 +742,14 @@ export function DesktopSettingsSection({
             </select>
           </label>
         )}
+        <ToggleRow
+          label={t('sessionLogButton')}
+          checked={desktop.value?.sessionLogButton ?? false}
+          disabled={!settingsWritable || busy !== undefined}
+          onChange={(checked) => {
+            void run('session-log', async () => { await desktopSettings.set('sessionLogButton', checked) })
+          }}
+        />
       </section>
 
       <section className="dshDesktopSettingsGroup" aria-labelledby="dsh-desktop-web-title">

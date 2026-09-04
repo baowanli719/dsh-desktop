@@ -85,8 +85,10 @@ function referrerOrigin(value: string | undefined): string | undefined {
  * A mutating request must carry the exact Origin. A read-only browser GET may
  * use the standard same-origin fetch metadata plus its same-origin referrer,
  * because browsers commonly omit Origin on same-origin GET requests.
+ *
+ * Exported for the other private loopback route families (gs-server client).
  */
-function isSameOriginLoopbackRequest(
+export function isSameOriginLoopbackRequest(
   req: IncomingMessage,
   expectedOrigin: string,
   mutating: boolean,

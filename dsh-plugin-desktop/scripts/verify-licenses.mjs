@@ -31,7 +31,26 @@ const ALLOWED_LICENSES = new Set([
   'CC0-1.0',
   'Zlib',
   'Python-2.0',
+  // dompurify (via dsh-better-sidebar) dual-licenses under two allowlisted
+  // licenses; redistribution under Apache-2.0 satisfies the OR expression.
+  '(MPL-2.0 OR Apache-2.0)',
+  // jszip (via docx-preview) dual-licenses; redistribution under MIT
+  // satisfies the OR expression.
+  '(MIT OR GPL-3.0-or-later)',
+  // pako combines two allowlisted permissive licenses.
+  '(MIT AND Zlib)',
 ])
+
+/**
+ * Graph-present packages that never reach the installer. The Univer Pro
+ * packages arrive as hard dependencies of @univerjs/presets but the office
+ * plugin's prebuilt client bundle only uses the Apache-2.0 core preset, and
+ * electron-builder excludes this scope through the package.json `files`
+ * ignore (`!node_modules/@univerjs-pro/**`). They carry no license field, so
+ * shipping them would be an unlicensed redistribution; keep them out of both
+ * the allowlist check and the generated notices.
+ */
+const NOT_SHIPPED_PREFIXES = ['@univerjs-pro/']
 
 /**
  * Licenses that permit redistribution only when their notice obligations are
@@ -43,6 +62,11 @@ const ALLOWED_LICENSES = new Set([
 const NOTICE_LICENSES = new Set([
   'LGPL-3.0-or-later',
   'Apache-2.0 AND LGPL-3.0-or-later',
+  // @huanlin/dsh-plugin-better-sidebar-plugin-office is AGPL-3.0. Approved
+  // for internal distribution only: do not ship installers to external
+  // parties without legal review, and keep the source offer intact (the
+  // package source is public upstream).
+  'AGPL-3.0',
 ])
 
 /**
@@ -88,6 +112,7 @@ for (let index = 0; index < queue.length; index += 1) {
   const current = queue[index]
   if (current === undefined || seen.has(current.name)) continue
   seen.add(current.name)
+  if (NOT_SHIPPED_PREFIXES.some(prefix => current.name.startsWith(prefix))) continue
   const manifest = JSON.parse(readFileSync(current.manifestPath, 'utf8'))
 
   if (current.name !== rootManifest.name) {
@@ -140,7 +165,7 @@ if (noticesArg !== -1) {
   const lines = [
     '# Third-Party Notices',
     '',
-    'DSH Desktop distributes the following third-party packages inside its installers.',
+    'gs-worker distributes the following third-party packages inside its installers.',
     'Each package ships with its own license text in the application files; this list records',
     'the package names, versions, and licenses for transparency.',
     '',

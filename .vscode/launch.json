@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "启动 gs-worker (Electron)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/dsh-plugin-desktop",
+      "preLaunchTask": "build: dsh-plugin-desktop",
+      "runtimeExecutable": "${workspaceFolder}/dsh-plugin-desktop/node_modules/.bin/electron",
+      "windows": {
+        "runtimeExecutable": "${workspaceFolder}/dsh-plugin-desktop/node_modules/electron/dist/electron.exe"
+      },
+      "runtimeArgs": [
+        ".",
+        "--enable-logging"
+      ],
+      "env": {
+        "ELECTRON_ENABLE_LOGGING": "1"
+      },
+      "console": "integratedTerminal",
+      "outputCapture": "std"
+    }
+  ]
+}

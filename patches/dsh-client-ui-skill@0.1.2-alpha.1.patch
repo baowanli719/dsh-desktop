@@ -1,0 +1,13 @@
+diff --git a/lib/client.js b/lib/client.js
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -284,6 +284,9 @@ window.__ModuleLoader__.load({
+ 				name: "skill",
+ 				order: 2,
+ 				async candidates(session, { query, signal }) {
++					// Desktop collapse: the root menu lists skills only through the
++					// desktop 技能 drill row; typed queries still fuzzy-complete.
++					if (query === "") return [];
+ 					const skills = await fetchCatalog(session.sessionId);
+ 					if (signal.aborted) return [];
+ 					return skills.filter((skill) => skill.name.startsWith(query)).map((skill) => ({

@@ -18,6 +18,7 @@ import { DesktopLayoutState } from './layout-state.ts'
 import { claimDesktopLayout } from './layout-service.ts'
 import { installDesktopOwnedStyles } from './styles.ts'
 import { DesktopThemePresenter } from './theme-presenter.ts'
+import { createDesktopWindowControlsApi } from './window-controls-api.ts'
 
 /**
  * Own the extended root/sidebar surface without reusing enhanced-mode chrome.
@@ -101,7 +102,7 @@ export function applyFramedShell(
     id: 'desktop-frame-titlebar',
     order: -1000,
     locale: DESKTOP_SETTINGS_LOCALE_NAMESPACE,
-    inject: () => ({ api, environment, setMode }),
+    inject: () => ({ api, environment, setMode, windowControls: createDesktopWindowControlsApi() }),
   }, DesktopFrameTitlebar))
 }
 

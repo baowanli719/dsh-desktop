@@ -132,6 +132,7 @@ describe('published package surface', () => {
         '@deepseek-ai/dsh-client-locale',
         '@deepseek-ai/dsh-client-ui-renderer',
         '@deepseek-ai/dsh-client-ui-settings',
+        '@deepseek-ai/dsh-client-ui-settings-general',
         '@deepseek-ai/dsh-client-ui-theme',
       ],
     })
@@ -209,6 +210,9 @@ describe('published package surface', () => {
       'function IconDesktopSettings',
       'if (id === "desktop")',
       'M5 14h6M8 11.5V14',
+      'function createSettingsNavigation',
+      'claimExternalLauncher',
+      'openSection(navigation.sectionId)',
     ]) {
       expect(patch).toContain(marker)
       expect(installedClient).toContain(marker)
@@ -633,8 +637,8 @@ describe('published package surface', () => {
 
   it('fixes the installed application identity', () => {
     expect(manifest.version).toBe(workspaceManifest.version)
-    expect(manifest.build?.productName).toBe('DSH Desktop')
-    expect(manifest.build?.appId).toBe('ai.deepseek.dsh.desktop')
+    expect(manifest.build?.productName).toBe('gs-worker')
+    expect(manifest.build?.appId).toBe('com.enterprise.officeagent')
     expect(manifest.build?.asarUnpack).toEqual([
       'package.json',
       'cordis.patch.yml',
@@ -647,19 +651,21 @@ describe('published package surface', () => {
     expect(manifest.files).toEqual(expect.arrayContaining([
       'build/app-icon.png',
       'build/app-icon-mac.png',
-      'build/tray-icon.svg',
       'build/tray-icon*.png',
       'docs/**',
     ]))
     expect(manifest.build?.files).toEqual([
       'build/app-icon.png',
       'build/app-icon-mac.png',
-      'build/tray-icon.svg',
       'build/tray-icon*.png',
       'cordis.patch.yml',
       'lib/**',
       'package.json',
       '!node_modules/node-pty/build/**',
+      // The unlicensed Univer Pro packages ride along as @univerjs/presets
+      // dependencies but stay out of the installer (verify-licenses.mjs
+      // NOT_SHIPPED_PREFIXES).
+      '!node_modules/@univerjs-pro/**',
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
     expect(manifest.build?.mac?.mergeASARs).toBe(false)
@@ -669,10 +675,9 @@ describe('published package surface', () => {
       target: 'nsis',
       arch: ['x64'],
     }])
-    expect(manifest.build?.win?.artifactName).toBe('DSH-Desktop-${version}-${arch}-Portable.${ext}')
+    expect(manifest.build?.win?.artifactName).toBe('gs-worker-${version}-${arch}-Portable.${ext}')
     expect(manifest.build?.nsis).toEqual({
       include: 'installer.nsh',
-      license: 'THIRD_PARTY_NOTICES.md',
       oneClick: false,
       perMachine: false,
       allowElevation: true,
@@ -680,9 +685,9 @@ describe('published package surface', () => {
       createDesktopShortcut: true,
       createStartMenuShortcut: true,
       differentialPackage: false,
-      shortcutName: 'DSH Desktop',
+      shortcutName: 'gs-worker',
       useZip: false,
-      artifactName: 'DSH-Desktop-${version}-${arch}-Setup.${ext}',
+      artifactName: 'gs-worker-${version}-${arch}-Setup.${ext}',
     })
     expect(manifest.build?.linux?.icon).toBe('build/app-icon.png')
   })
@@ -792,10 +797,12 @@ describe('published package surface', () => {
   })
 
   it('keeps one fixed brand-blue tray source for generated native assets', () => {
-    const source = readFileSync(new URL('build/tray-icon.svg', packageRoot), 'utf8')
+    const source = readFileSync(new URL('build/brand/logo.png', packageRoot))
+    const script = readFileSync(new URL('scripts/generate-tray-icons.mjs', packageRoot), 'utf8')
 
-    expect(source.match(/#4D6BFE/gu)).toHaveLength(1)
-    expect(source).not.toMatch(/<style\b|prefers-color-scheme/iu)
+    expect(source.byteLength).toBeGreaterThan(0)
+    expect(script).toContain("const BRAND_BLUE = '#3D77DC'")
+    expect([...new Set(script.match(/#[0-9A-Fa-f]{6}/gu) ?? [])].sort()).toEqual(['#000000', '#3D77DC'])
     for (const filename of [
       'tray-iconTemplate.png',
       'tray-iconTemplate@2x.png',
@@ -808,15 +815,15 @@ describe('published package surface', () => {
     }
   })
 
-  it('keeps the iOS Default source icon unmodified', () => {
+  it('keeps the brand-derived source icon stable', () => {
     const digest = createHash('sha256')
       .update(readFileSync(new URL('build/app-icon.png', packageRoot)))
       .digest('hex')
 
-    expect(digest).toBe('315fbc6e57ff1f34894f21f66fb7f9f26deccf78333c71fad21a6cec64e7de80')
+    expect(digest).toBe('2e17507d389d64a80c85515047edc48abf9bcf11e83cb70cd1e24063198de55b')
   })
 
-  it('generates a centered macOS icon with a 100-pixel visual inset', async () => {
+  it('generates a centered macOS icon inside the platform visual safe area', async () => {
     const source = await sharp(readFileSync(new URL('build/app-icon.png', packageRoot))).metadata()
     const icon = sharp(readFileSync(new URL('build/app-icon-mac.png', packageRoot)))
     const metadata = await icon.metadata()
@@ -837,9 +844,9 @@ describe('published package surface', () => {
     expect(metadata.icc).toEqual(source.icc)
     expect(info).toEqual(expect.objectContaining({
       width: 824,
-      height: 824,
+      height: 496,
       trimOffsetLeft: -100,
-      trimOffsetTop: -100,
+      trimOffsetTop: -264,
     }))
   })
 

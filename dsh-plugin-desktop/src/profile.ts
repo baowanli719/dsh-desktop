@@ -1,7 +1,16 @@
 /** Compatibility profile composition over the official Web bundle and user plugins. */
 
 import { createRequire } from 'node:module'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { isIP } from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -28,7 +37,8 @@ import FileSettingsProvider, {
   resolveSpec as resolveSettingsFileSpec,
   type Config as SettingsFileConfig,
 } from '@deepseek-ai/dsh-settings-file'
-import { parseAllDocuments, parseDocument } from 'yaml'
+import { isMap, isScalar, isSeq, parseAllDocuments, parseDocument } from 'yaml'
+import type { ScalarTag } from 'yaml'
 import { unpackedAsarPath } from './packaged-runtime-path.ts'
 import { findOverlayPackage, resolveOverlayPackage } from './package-overlay.ts'
 import { DESKTOP_DEFAULT_WEB_PORT } from './desktop-port.ts'
@@ -85,6 +95,19 @@ const UPSTREAM_PWSH_SANDBOX_PACKAGE = '@deepseek-ai/dsh-pwsh-sandbox'
 const DESKTOP_WINDOWS_PWSH_SANDBOX_ROW_ID = 'desktop-windows-pwsh-sandbox'
 const DESKTOP_WINDOWS_PWSH_SANDBOX_PACKAGE = 'dsh-plugin-desktop/windows-pwsh-sandbox'
 const AGENT_PRESETS_ROW_ID = 'agent-presets'
+const AGENT_PRESET_COMPOSITION_FILE = 'agent.cordis.yml'
+/** Profile-local directory holding the sanitized Desktop-owned preset root. */
+export const DESKTOP_PRESET_ROOT_DIR = 'desktop-agent-presets'
+/**
+ * Office-assistant persona injected at the first step of every desktop agent
+ * task. One source feeds both ends of the assembly: prepareDesktopProfile
+ * pushes it onto the deployment `system-prompt` row, and
+ * materializeDesktopPresetRoot rewrites every preset persona row with it, so
+ * no patch layer or shipped preset can reopen an English coding-agent
+ * identity.
+ */
+export const DESKTOP_AGENT_PERSONA =
+  '你是国盛证券的办公助理，为国盛证券员工提供日常办公支持，包括文档撰写与整理、资料查询、数据汇总、会议纪要、流程指引等。回答应当专业、准确、简洁；涉及具体业务数据或内部规定时，以可核实的资料为准，不确定的内容要明确说明，不要臆造。'
 const DEFAULT_DESKTOP_SHELL_MODE: DesktopShellMode = 'compatibility'
 const DEFAULT_DESKTOP_PORT = DESKTOP_DEFAULT_WEB_PORT
 const DESKTOP_WEB_SERVER_ROW_ID = 'desktop-webserver'
@@ -759,6 +782,316 @@ function assertEffectiveMarketRows(
 }
 
 /**
+ * Local skill discovery is banned in the desktop product: skills arrive from
+ * gsclaw-server alone. The upstream row that would re-open local discovery is
+ * `skill-filesystem` (project/home root scanning). The `tool-skill` row (the
+ * model-facing catalog over the ctx.skills registry) is not banned: presets
+ * mount it per agent to consume the server provider's catalog, so it is
+ * pinned to its canonical package instead (assertEffectiveSkillRows below).
+ */
+const LOCAL_SKILL_ROW_IDS: ReadonlySet<string> = new Set(['skill-filesystem'])
+const LOCAL_SKILL_PACKAGE_NAMES: ReadonlySet<string> = new Set([
+  '@deepseek-ai/dsh-skill-filesystem',
+])
+
+/** Return whether one Loader row claims the banned local-skill identity. */
+function isLocalSkillEntry(entry: { readonly id?: unknown, readonly name?: unknown }): boolean {
+  return (typeof entry.id === 'string' && LOCAL_SKILL_ROW_IDS.has(entry.id))
+    || (typeof entry.name === 'string' && LOCAL_SKILL_PACKAGE_NAMES.has(entry.name))
+}
+
+/** Remove local-skill rows recursively so no patch can re-enable local discovery. */
+function filterLocalSkillRows(rows: EntryOptions[]): EntryOptions[] {
+  const filtered: EntryOptions[] = []
+  for (const row of rows) {
+    if (isLocalSkillEntry(row)) continue
+    if (row.group === true && Array.isArray(row.config)) {
+      filtered.push({ ...row, config: filterLocalSkillRows(row.config) })
+    } else {
+      filtered.push(row)
+    }
+  }
+  return filtered
+}
+
+/**
+ * Strip every local-skill reference from one patch list, whether the row is
+ * inserted, overridden, or re-enabled. Applied to every patch layer except the
+ * launcher-owned desktop layer, whose own `disabled: true` row is the first
+ * gate and the only sanctioned mention of this identity.
+ */
+export function filterLocalSkillPatches(patches: PatchOptions[]): PatchOptions[] {
+  const filtered: PatchOptions[] = []
+  for (const patch of patches) {
+    if (isLocalSkillEntry(patch)) continue
+    if (Array.isArray(patch.insert)) {
+      filtered.push({ ...patch, insert: filterLocalSkillRows(patch.insert) })
+    } else {
+      filtered.push(patch)
+    }
+  }
+  return filtered
+}
+
+/** Pinned tool-skill identity: the canonical package a surviving row must carry. */
+const TOOL_SKILL_PINNED_ROWS: ReadonlyMap<string, string> = new Map([
+  ['tool-skill', '@deepseek-ai/dsh-tool-skill'],
+])
+const TOOL_SKILL_PINNED_PACKAGE_NAMES: ReadonlySet<string> = new Set(TOOL_SKILL_PINNED_ROWS.values())
+
+/** Return whether one Loader row claims the pinned tool-skill identity. */
+function isToolSkillPinnedEntry(entry: { readonly id?: unknown, readonly name?: unknown }): boolean {
+  return (typeof entry.id === 'string' && TOOL_SKILL_PINNED_ROWS.has(entry.id))
+    || (typeof entry.name === 'string' && TOOL_SKILL_PINNED_PACKAGE_NAMES.has(entry.name))
+}
+
+/**
+ * Assert the composed graph holds no enabled local-skill row, and that any
+ * surviving `tool-skill` row keeps its canonical package identity so no layer
+ * can swap in a same-named impostor implementation.
+ */
+export function assertEffectiveSkillRows(rows: readonly EntryOptions[]): void {
+  for (const row of rows) {
+    if (isLocalSkillEntry(row) && row.disabled !== true) {
+      throw new Error(`${BIN_NAME}: local skill provider ${JSON.stringify(row.id ?? row.name)} survived desktop profile composition`)
+    }
+    if (isToolSkillPinnedEntry(row) && row.disabled !== true) {
+      const canonical = typeof row.id === 'string' ? TOOL_SKILL_PINNED_ROWS.get(row.id) : undefined
+      if (canonical === undefined || row.name !== canonical) {
+        throw new Error(`${BIN_NAME}: pinned tool-skill row ${JSON.stringify(row.id ?? row.name)} lost its canonical identity in desktop profile composition`)
+      }
+    }
+    if (row.group === true && Array.isArray(row.config)) {
+      assertEffectiveSkillRows(row.config)
+    }
+  }
+}
+
+/**
+ * Server-mediated model access: every Agent-loop LLM call crosses the
+ * loopback gsclaw-server proxy (src/server/gs-llm-proxy.ts), whose provider
+ * profiles arrive through the mirrored `llm-pi-ai:` settings section. The
+ * direct DeepSeek adapter would bypass the proxy and the Models settings page
+ * would hold provider keys on the client, so both stay disabled; the
+ * `llm-pi-ai` and `agent-default-model` rows must keep their canonical
+ * identity so no layer can re-point model traffic elsewhere.
+ */
+const LLM_DISABLED_ROW_IDS: ReadonlySet<string> = new Set(['llm-deepseek', 'ui-settings-models'])
+const LLM_DISABLED_PACKAGE_NAMES: ReadonlySet<string> = new Set([
+  '@deepseek-ai/dsh-llm-deepseek',
+  '@deepseek-ai/dsh-client-ui-settings-models',
+])
+const LLM_PI_AI_PACKAGE = '@deepseek-ai/dsh-llm-pi-ai'
+const AGENT_DEFAULT_MODEL_PACKAGE = '@deepseek-ai/dsh-agent-default-model'
+const LLM_PINNED_ROWS: ReadonlyMap<string, string> = new Map([
+  ['llm-pi-ai', LLM_PI_AI_PACKAGE],
+  ['agent-default-model', AGENT_DEFAULT_MODEL_PACKAGE],
+])
+const LLM_PINNED_PACKAGE_NAMES: ReadonlySet<string> = new Set(LLM_PINNED_ROWS.values())
+
+/** Return whether one Loader row claims a force-disabled model identity. */
+function isLlmDisabledEntry(entry: { readonly id?: unknown, readonly name?: unknown }): boolean {
+  return (typeof entry.id === 'string' && LLM_DISABLED_ROW_IDS.has(entry.id))
+    || (typeof entry.name === 'string' && LLM_DISABLED_PACKAGE_NAMES.has(entry.name))
+}
+
+/** Return whether one Loader row claims a pinned model-row identity. */
+function isLlmPinnedEntry(entry: { readonly id?: unknown, readonly name?: unknown }): boolean {
+  return (typeof entry.id === 'string' && LLM_PINNED_ROWS.has(entry.id))
+    || (typeof entry.name === 'string' && LLM_PINNED_PACKAGE_NAMES.has(entry.name))
+}
+
+/** Return whether one Loader row touches any Desktop-owned model identity. */
+function isLlmManagedEntry(entry: { readonly id?: unknown, readonly name?: unknown }): boolean {
+  return isLlmDisabledEntry(entry) || isLlmPinnedEntry(entry)
+}
+
+/** Remove model-row mentions recursively so no patch can rewrite them. */
+function filterLlmRows(rows: EntryOptions[]): EntryOptions[] {
+  const filtered: EntryOptions[] = []
+  for (const row of rows) {
+    if (isLlmManagedEntry(row)) continue
+    if (row.group === true && Array.isArray(row.config)) {
+      filtered.push({ ...row, config: filterLlmRows(row.config) })
+    } else {
+      filtered.push(row)
+    }
+  }
+  return filtered
+}
+
+/**
+ * Strip every model-row reference from one user or home patch list, whether
+ * the row is inserted, overridden, re-enabled, or re-pointed. Bundle layers
+ * keep their canonical rows: the launcher-owned desktop layer disables the
+ * direct adapter and the Models page after them, and the mirrored settings
+ * sections outrank any composition-layer `llm-pi-ai` config.
+ */
+export function filterLlmPatches(patches: PatchOptions[]): PatchOptions[] {
+  const filtered: PatchOptions[] = []
+  for (const patch of patches) {
+    if (isLlmManagedEntry(patch)) continue
+    if (Array.isArray(patch.insert)) {
+      filtered.push({ ...patch, insert: filterLlmRows(patch.insert) })
+    } else {
+      filtered.push(patch)
+    }
+  }
+  return filtered
+}
+
+/** Assert the composed graph keeps the proxy-only model posture. */
+export function assertEffectiveLlmRows(rows: readonly EntryOptions[]): void {
+  for (const row of rows) {
+    if (isLlmDisabledEntry(row) && row.disabled !== true) {
+      throw new Error(`${BIN_NAME}: direct model path ${JSON.stringify(row.id ?? row.name)} survived desktop profile composition`)
+    }
+    if (isLlmPinnedEntry(row)) {
+      const canonical = typeof row.id === 'string' ? LLM_PINNED_ROWS.get(row.id) : undefined
+      if (canonical === undefined || row.name !== canonical || row.disabled === true) {
+        throw new Error(`${BIN_NAME}: pinned model row ${JSON.stringify(row.id ?? row.name)} lost its canonical identity in desktop profile composition`)
+      }
+    }
+    if (row.group === true && Array.isArray(row.config)) {
+      assertEffectiveLlmRows(row.config)
+    }
+  }
+}
+
+/** Server-mediated default model fixed for one desktop generation. */
+export interface DesktopLlmProfilePlan {
+  /** Default selection resolved from the server ClientConfig models section. */
+  readonly defaultModel?: {
+    readonly provider: string
+    readonly model: string
+  }
+}
+
+/** The `!!js` scalar dialect preset compositions share with the Cordis include. */
+const JS_EXPR_TAG: ScalarTag = {
+  tag: 'tag:yaml.org,2002:js',
+  identify: (value: unknown) => typeof value === 'object' && value !== null && '__jsExpr' in value,
+  resolve: (data: string) => ({ __jsExpr: data }),
+  // stringify receives the Scalar NODE (whose value is either the resolved
+  // `{ __jsExpr }` or the raw source string) and its return is emitted
+  // verbatim. Without it the emitter falls back to String(value), which
+  // rewrites every untouched `!!js` scalar to the literal `[object Object]`.
+  stringify: (item: { readonly value?: unknown }) => {
+    const value = item.value
+    if (typeof value === 'string') return value
+    if (typeof value === 'object' && value !== null && '__jsExpr' in value) {
+      return String((value as { readonly __jsExpr: unknown }).__jsExpr)
+    }
+    return ''
+  },
+}
+
+/** Read one scalar field off a composition row without converting `!!js` values. */
+function compositionRowField(row: unknown, key: string): unknown {
+  if (!isMap(row)) return undefined
+  const node = row.get(key, true)
+  return isScalar(node) ? node.value : undefined
+}
+
+/** Remove local-skill rows from one parsed composition sequence, recursing into groups. */
+function stripLocalSkillSequence(sequence: unknown): void {
+  if (!isSeq(sequence)) return
+  sequence.items = sequence.items.filter((item) => {
+    if (!isMap(item)) return true
+    if (isLocalSkillEntry({
+      id: compositionRowField(item, 'id'),
+      name: compositionRowField(item, 'name'),
+    })) return false
+    if (compositionRowField(item, 'group') === true) {
+      stripLocalSkillSequence(item.get('config', true))
+    }
+    return true
+  })
+}
+
+/**
+ * Rewrite one preset composition without its local-skill rows. A document the
+ * strict parser would already reject is returned unchanged: discovery reports
+ * it broken either way, and the sanitizer must not invent new failure modes.
+ */
+export function stripLocalSkillCompositionRows(text: string): string {
+  const document = parseDocument(text, { prettyErrors: false, customTags: [JS_EXPR_TAG] })
+  if (document.errors.length > 0) return text
+  stripLocalSkillSequence(document.contents)
+  return document.toString()
+}
+
+/** Canonical package identity of the preset persona row. */
+const PRESET_PERSONA_PACKAGE = '@deepseek-ai/dsh-persona'
+
+/** Retext persona rows in one parsed composition sequence, recursing into groups. */
+function rewritePresetPersonaSequence(sequence: unknown): void {
+  if (!isSeq(sequence)) return
+  for (const item of sequence.items) {
+    if (!isMap(item)) continue
+    if (compositionRowField(item, 'name') === PRESET_PERSONA_PACKAGE) {
+      const config = item.get('config', true)
+      if (isMap(config)) config.set('text', DESKTOP_AGENT_PERSONA)
+    }
+    if (compositionRowField(item, 'group') === true) {
+      rewritePresetPersonaSequence(item.get('config', true))
+    }
+  }
+}
+
+/**
+ * Rewrite one preset composition so its persona row carries the Desktop
+ * office-assistant identity; sibling persona keys (`complete`,
+ * `includeRuntimeContext`) stay untouched. Shares the skill stripper's
+ * malformed-document contract: a text the strict parser rejects is returned
+ * unchanged.
+ */
+export function rewriteDesktopPresetPersona(text: string): string {
+  const document = parseDocument(text, { prettyErrors: false, customTags: [JS_EXPR_TAG] })
+  if (document.errors.length > 0) return text
+  rewritePresetPersonaSequence(document.contents)
+  return document.toString()
+}
+
+/**
+ * Materialize the Desktop-owned preset root: the shipped presets with every
+ * `skills/` directory and every local-skill composition row removed, and
+ * every persona row retexted to the Desktop office-assistant identity.
+ * Presets carry non-skill content (tools, plan mode) that must stay mounted,
+ * so the root itself cannot be dropped; and no profile patch reaches rows
+ * inside a preset's own composition file, so the file must be rewritten.
+ * Staged beside the target and renamed into place so a crash never leaves a
+ * half-written roster.
+ */
+export function materializeDesktopPresetRoot(sourceRoot: string, targetDir: string): string {
+  const staging = `${targetDir}.tmp-${String(process.pid)}`
+  rmSync(staging, { recursive: true, force: true })
+  mkdirSync(staging, { recursive: true })
+  for (const entry of readdirSync(sourceRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const sourcePreset = join(sourceRoot, entry.name)
+    const targetPreset = join(staging, entry.name)
+    mkdirSync(targetPreset, { recursive: true })
+    for (const file of readdirSync(sourcePreset, { withFileTypes: true })) {
+      if (file.name === 'skills') continue
+      const sourcePath = join(sourcePreset, file.name)
+      const targetPath = join(targetPreset, file.name)
+      if (file.isFile() && file.name === AGENT_PRESET_COMPOSITION_FILE) {
+        writeFileSync(
+          targetPath,
+          rewriteDesktopPresetPersona(stripLocalSkillCompositionRows(readFileSync(sourcePath, 'utf8'))),
+        )
+      } else {
+        cpSync(sourcePath, targetPath, { recursive: true })
+      }
+    }
+  }
+  rmSync(targetDir, { recursive: true, force: true })
+  renameSync(staging, targetDir)
+  return targetDir
+}
+
+/**
  * Read the Desktop machine-wide patch without relaxing upstream patch parsing.
  *
  * A YAML null document is the natural result of an empty, comment-only, or
@@ -801,6 +1134,7 @@ function loadDesktopMachinePatches(home: string): PatchOptions[] {
  * @param profileName - existing or lazily available Web profile to compose.
  * @param pluginStatePath - optional Desktop-private disabled-bundle state.
  * @param marketSelection - machine-level provider request fixed for this generation.
+ * @param llmPlan - server-mediated default model fixed for this generation.
  * @returns root config, profile metadata, and ordered patches.
  */
 export function prepareDesktopProfile(
@@ -811,6 +1145,7 @@ export function prepareDesktopProfile(
   pluginStatePath?: string,
   marketSelection: DesktopMarketSnapshot = DEFAULT_DESKTOP_MARKET_SNAPSHOT,
   hooks: DesktopProfilePreparationHooks = {},
+  llmPlan: DesktopLlmProfilePlan = {},
 ): PreparedDesktopProfile {
   const lanAddresses = preparedLanAddresses(hooks.lanAddresses)
   const profileDir = profileName === DESKTOP_PROFILE_NAME
@@ -851,7 +1186,7 @@ export function prepareDesktopProfile(
       dshMarketPatches = layer.patches
       continue
     }
-    bundlePatches.push(...layer.patches)
+    bundlePatches.push(...filterLocalSkillPatches(layer.patches))
     if (layer.packageName !== '@deepseek-ai/dsh-web-app') continue
     bundlePatches.push(...desktopPatches)
     desktopLayerInserted = true
@@ -866,8 +1201,8 @@ export function prepareDesktopProfile(
     bareModuleBaseUrl,
   )
   const filteredBundles = filterMarketProviderPatches(bundlePatches)
-  const filteredProfile = filterMarketProviderPatches(profile.patches)
-  const filteredHome = filterMarketProviderPatches(homePatches)
+  const filteredProfile = filterMarketProviderPatches(filterLlmPatches(filterLocalSkillPatches(profile.patches)))
+  const filteredHome = filterMarketProviderPatches(filterLlmPatches(filterLocalSkillPatches(homePatches)))
   const hasProviderConflict = filteredBundles.removedProviderReference
     || filteredProfile.removedProviderReference
     || filteredHome.removedProviderReference
@@ -914,6 +1249,8 @@ export function prepareDesktopProfile(
   const composedRows = composeEntries([patches])
   assertUniqueEntryIds(composedRows)
   assertEffectiveMarketRows(composedRows, effectiveMarket)
+  assertEffectiveSkillRows(composedRows)
+  assertEffectiveLlmRows(composedRows)
   const rows = new Map<string, EntryOptions>()
   for (const row of composedRows) {
     if (typeof row.id === 'string') rows.set(row.id, row)
@@ -955,6 +1292,20 @@ export function prepareDesktopProfile(
       trustedHosts: webRuntimeTrustedHosts(webRuntimeConfig.trustedHosts, lanAddresses),
     },
   })
+  const systemPrompt = rows.get('system-prompt')
+  if (systemPrompt === undefined) {
+    throw new Error(`${BIN_NAME}: desktop profile has no system-prompt row`)
+  }
+  patches.push({
+    id: 'system-prompt',
+    config: {
+      ...rowConfig(systemPrompt),
+      // The first-step system prompt opens in Chinese with the Desktop
+      // office-assistant identity; the fixed English Harness opener is dropped.
+      includeHarnessIdentity: false,
+      persona: DESKTOP_AGENT_PERSONA,
+    },
+  })
   if (mode === 'advanced' || mode === 'extended') {
     for (const [id, packageName] of [
       ['ui-layout', UI_LAYOUT_PACKAGE],
@@ -973,9 +1324,19 @@ export function prepareDesktopProfile(
   }
   const presets = rows.get(AGENT_PRESETS_ROW_ID)
   if (presets !== undefined) {
+    // The roster stays — presets carry the agent's persona and tool rows —
+    // but it scans only the sanitized copy materialized above: the shipped
+    // root's `skills/` directories and local-skill composition rows are
+    // stripped, and the package-derived shipped/user roots are excluded so no
+    // composition outside Desktop control can mount local skill discovery.
     const config = {
       ...rowConfig(presets),
-      roots: [{ path: shippedPresetRoot(), trust: 'system' }],
+      roots: [{
+        path: materializeDesktopPresetRoot(shippedPresetRoot(), join(profileDir, DESKTOP_PRESET_ROOT_DIR)),
+        trust: 'system',
+      }],
+      includeShippedRoot: false,
+      includeUserRoot: false,
     }
     patches.push({ id: AGENT_PRESETS_ROW_ID, config })
   }
@@ -1070,6 +1431,25 @@ export function prepareDesktopProfile(
   }
   if ((telemetryDisabled ?? '') !== '' && rows.has('session-telemetry-otel')) {
     patches.push({ id: 'session-telemetry-otel', disabled: true })
+  }
+  // Server-mediated model access: the pi-ai adapter row keeps its canonical
+  // identity (provider profiles arrive through the mirrored `llm-pi-ai:`
+  // settings section), and the default-model row takes the server-resolved
+  // selection whenever the ClientConfig supplied one.
+  if (rows.get('llm-pi-ai')?.name !== LLM_PI_AI_PACKAGE) {
+    throw new Error(`${BIN_NAME}: desktop profile must use ${LLM_PI_AI_PACKAGE} in the llm-pi-ai row`)
+  }
+  if (rows.get('agent-default-model')?.name !== AGENT_DEFAULT_MODEL_PACKAGE) {
+    throw new Error(`${BIN_NAME}: desktop profile must use ${AGENT_DEFAULT_MODEL_PACKAGE} in the agent-default-model row`)
+  }
+  if (llmPlan.defaultModel !== undefined) {
+    patches.push({
+      id: 'agent-default-model',
+      config: {
+        provider: llmPlan.defaultModel.provider,
+        model: llmPlan.defaultModel.model,
+      },
+    })
   }
   const desktopShell = rows.get('desktop-shell')
   if (desktopShell === undefined) {

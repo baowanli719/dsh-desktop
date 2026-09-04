@@ -1,0 +1,14 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build: dsh-plugin-desktop",
+      "type": "shell",
+      "command": "corepack yarn workspace dsh-plugin-desktop build",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

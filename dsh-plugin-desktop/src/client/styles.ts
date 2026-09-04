@@ -31,10 +31,13 @@ body:is([data-dsh-desktop-mode="extended"], [data-dsh-desktop-mode="advanced"]) 
 .dshDesktopFrame[data-details-collapsed] .dshDesktopDetailsSurface { border-left: none; }
 .dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] { grid-template-rows: ${ADVANCED_WINDOWS_TITLEBAR_HEIGHT}px minmax(0, 1fr); }
 .dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] .dshDesktopSidebarSurface { grid-row: 1 / -1; }
-.dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] .dshDesktopConversationSurface,
+.dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] .dshDesktopConversationSurface { grid-row: 1 / -1; }
 .dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] .dshDesktopDetailsSurface { grid-row: 2; }
-.dshDesktopWindowsCaptionRow { position: relative; grid-column: 2 / -1; grid-row: 1; min-width: 0; background: var(--dsw-alias-bg-base); }
-.dshDesktopWindowsCaptionRow::before { content: ""; position: absolute; inset: 0 ${WINDOWS_CAPTION_CONTROLS_WIDTH}px 0 0; user-select: none; -webkit-app-region: drag; }
+/* The conversation title row now occupies the native 32px caption band. Keep
+   this grid anchor transparent and non-interactive: native caption buttons
+   remain above the page, while the real header supplies the drag region. */
+.dshDesktopWindowsCaptionRow { position: relative; grid-column: 2 / -1; grid-row: 1; min-width: 0; background: transparent; pointer-events: none; }
+.dshDesktopWindowsCaptionRow::before { display: none; }
 .dshDesktopFrame[data-dragging] { transition: none; }
 .dshDesktopOverlay { position: absolute; z-index: 1000; inset: 0; pointer-events: none; }
 .dshDesktopOverlay > * { pointer-events: auto; }
@@ -42,11 +45,36 @@ body:is([data-dsh-desktop-mode="extended"], [data-dsh-desktop-mode="advanced"]) 
 .dshDesktopFrame[data-dragging] .dshDesktopResizeHandle { transition: none; }
 .dshDesktopNoDrag, button, input, textarea, select, label, summary, a, [contenteditable="true"], [role="button"], [role="checkbox"], [role="dialog"], [role="menuitem"], [role="option"], [role="switch"], [role="tab"] { -webkit-app-region: no-drag !important; }
 [role="dialog"], [aria-modal="true"] { -webkit-app-region: no-drag !important; }
-html:has([aria-modal="true"]) .dshDesktopWindowsCaptionRow::before { -webkit-app-region: no-drag !important; }
+/* On Windows the session title row doubles as the compact drag strip. Its
+   interactive descendants remain no-drag through the shared control rule. */
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] [data-slot="conversation"] header {
+  padding-top: 20px;
+  padding-right: 78px;
+}
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"][data-dsh-sidebar-collapsed] [data-slot="conversation"] header {
+  padding-right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 12}px;
+}
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] [data-slot="conversation"] header > :first-child { -webkit-app-region: drag; }
+/* better-sidebar owns its toggle cluster coordinates. Its title-bar
+   compatibility preset follows the measured native inset; Desktop only
+   anchors the cluster to the moving conversation edge. */
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] [class*="toggleCluster"] {
+  right: calc(var(--dsh-sidebar-width, 0px) + 10px);
+  transition: right var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+}
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"][data-dsh-sidebar-dragging] [class*="toggleCluster"] { transition: none; }
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="darwin"] [data-slot="conversation"] header { padding-top: 4px; padding-right: 98px; }
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="darwin"] [class*="toggleCluster"] { top: 26px; }
 @media (prefers-reduced-motion: reduce) {
   .dshDesktopFrame,
   .dshDesktopResizeHandle { transition: none !important; }
 }
+/* Slash/plus trigger menu: upstream pins both edges to the composer card
+   (712-952px on wide windows). Keep the left edge flush and cap the width at
+   the usual palette width. The menu stylesheet is injected when the module
+   loads — after this tag — so the override needs higher specificity than the
+   module's single-class selector rather than relying on order. */
+body [data-trigger-menu] { right: auto; width: min(280px, 100%); }
 `
 
 /** Install shared panel styles; mode selectors keep enhanced and extended chrome independent. */

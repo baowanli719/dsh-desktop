@@ -22,6 +22,9 @@ export const WINDOWS_CAPTION_CONTROLS_WIDTH = 138
 /** Height of the independent Desktop frame used by compatibility and extended modes. */
 export const DESKTOP_FRAME_HEIGHT = 36
 
+/** Compressed caption band on Windows framed modes; macOS keeps the taller frame for the traffic lights. */
+export const DESKTOP_FRAME_HEIGHT_WIN32 = 28
+
 /** Top edge that centers macOS traffic lights in an independent Desktop frame. */
 export const DESKTOP_FRAME_MACOS_TRAFFIC_LIGHT_TOP = 12
 

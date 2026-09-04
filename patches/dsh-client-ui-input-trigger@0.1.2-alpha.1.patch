@@ -1,0 +1,83 @@
+diff --git a/lib/client.js b/lib/client.js
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -9,6 +9,15 @@ window.__ModuleLoader__.load({
+ 		let react_jsx_runtime = require("react/jsx-runtime");
+ 		let react = require("react");
+ 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
++		/** Candidate icons the desktop adds beyond the upstream ReferenceIcon kinds. */
++		function renderDesktopCandidateIcon(icon) {
++			const Icon = icon === "skill" ? _deepseek_ai_dsh_client_ui_primitives.IconSkillOutline16 : icon === "goal" ? _deepseek_ai_dsh_client_ui_primitives.IconGoalOutline16 : icon === "command" ? _deepseek_ai_dsh_client_ui_primitives.IconCodeOutline16 : void 0;
++			if (Icon === void 0) return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.ReferenceIcon, {
++				kind: icon,
++				size: 16
++			});
++			return (0, react_jsx_runtime.jsx)(Icon, { size: 16 });
++		}
+ 		//#region ../../context/file-reference/src/grammar.ts
+ 		/**
+ 		* Extract an `@path` or `@"path with spaces` token at the cursor. An `@`
+@@ -378,21 +387,23 @@ window.__ModuleLoader__.load({
+ 					this.dismiss();
+ 					return;
+ 				}
+-				const match = this.deps.roster.sources(hit.trigger).find((item) => item.name === source);
++				const roster = this.deps.roster.sources(hit.trigger);
++				const match = roster.find((item) => item.name === source);
+ 				if (match === void 0) {
+ 					this.dismiss();
+ 					return;
+ 				}
++				const launched = roster.filter((item) => item === match || item.launchers?.includes(source));
+ 				this.stopFetch();
+ 				this.hit = hit;
+ 				this.launcher.set(source);
+-				this.menu.set(seedGroups(this.menu.getSnapshot(), [match]));
++				this.menu.set(seedGroups(this.menu.getSnapshot(), launched));
+ 				this.reduce({
+ 					type: "hit",
+ 					hit
+ 				});
+-				this.refreshHeaders(hit, [match]);
+-				this.fetchCandidates(hit, [match]);
++				this.refreshHeaders(hit, launched);
++				this.fetchCandidates(hit, launched);
+ 			}
+ 			/**
+ 			* Pointer pick from MenuView: route the clicked candidate through onPick
+@@ -988,10 +999,7 @@ window.__ModuleLoader__.load({
+ 								item.icon !== void 0 && (0, react_jsx_runtime.jsx)("span", {
+ 									className: MenuView_module_css_default.itemIcon,
+ 									"aria-hidden": true,
+-									children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.ReferenceIcon, {
+-										kind: item.icon,
+-										size: 16
+-									})
++									children: renderDesktopCandidateIcon(item.icon)
+ 								}),
+ 								(0, react_jsx_runtime.jsx)("span", {
+ 									className: MenuView_module_css_default.itemName,
+diff --git a/lib/types/types.d.ts b/lib/types/types.d.ts
+--- a/lib/types/types.d.ts
++++ b/lib/types/types.d.ts
+@@ -28,7 +28,7 @@ export type PickVia = 'menu' | 'space' | 'enter';
+ /** What a pick asks for: resolve the candidate, or drill into it in place. */
+ export type PickAction = 'pick' | 'drill';
+ /** Leading glyph token of one menu candidate, mapped to its SVG by the menu view. */
+-export type InputTriggerCandidateIcon = 'file' | 'folder' | 'session';
++export type InputTriggerCandidateIcon = 'file' | 'folder' | 'session' | 'skill' | 'goal' | 'command';
+ /** One menu candidate. Pure display data — zero behavior declaration. */
+ export interface InputTriggerCandidate {
+     readonly name: string;
+@@ -131,6 +131,11 @@ export interface InputTriggerSource {
+     readonly name: string;
+     /** Menu group display order (lower = higher in the list; default 0). */
+     readonly order?: number;
++    /**
++     * Programmatic source launchers this source accompanies. The source keeps
++     * its own candidates and pick behavior while sharing the launcher's menu.
++     */
++    readonly launchers?: readonly string[];
+     /** Whether the menu renders the source-title row; defaults to true. */
+     readonly showGroupTitle?: boolean;
+     candidates(session: ClientSessionContext, req: CandidateRequest): Promise<readonly InputTriggerCandidate[]>;

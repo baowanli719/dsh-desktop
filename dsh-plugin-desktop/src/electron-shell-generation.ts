@@ -481,6 +481,41 @@ export class ElectronShellGeneration {
     else window.webContents.openDevTools({ mode: 'detach', activate: true })
   }
 
+  /** Minimize the mounted main window. */
+  minimizeWindow(): void {
+    const window = this.mountedWindow()
+    window.minimize()
+  }
+
+  /** Toggle the mounted main window's maximized state. */
+  toggleWindowMaximize(): boolean {
+    const window = this.mountedWindow()
+    if (window.isMaximized()) window.unmaximize()
+    else window.maximize()
+    return window.isMaximized()
+  }
+
+  /** Close the mounted main window through its ordinary close handlers. */
+  closeWindow(): void {
+    const window = this.mountedWindow()
+    window.close()
+  }
+
+  /** Whether the mounted main window is currently maximized. */
+  isWindowMaximized(): boolean {
+    const window = this.window
+    if (window === undefined || window.isDestroyed()) return false
+    return window.isMaximized()
+  }
+
+  private mountedWindow(): BrowserWindow {
+    const window = this.window
+    if (window === undefined || window.isDestroyed()) {
+      throw new Error('dsh-plugin-desktop: window controls require a mounted window')
+    }
+    return window
+  }
+
   notifyAttention(notification: DesktopNotification): void {
     const window = this.window
     if (window === undefined || window.isDestroyed() || window.isFocused()) return

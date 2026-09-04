@@ -74,14 +74,15 @@ describe('compatibility BrowserWindow options', () => {
     expect(DESKTOP_FRAME_HEIGHT).toBe(36)
   })
 
-  it('uses an independent Windows frame with native controls on the left-side action layout', () => {
+  it('uses an independent frameless Windows frame with renderer-drawn caption controls', () => {
     const options = compatibilityWindowOptions(spec, {} as NativeImage, 'win32', preload)
 
     expect(options.title).toBe('DeepSeek Harness Desktop')
     expect(options.backgroundColor).toBe('#202124')
     expect(options.autoHideMenuBar).toBe(true)
-    expect(options.titleBarStyle).toBe('hidden')
-    expect(options.titleBarOverlay).toEqual(expect.objectContaining({ height: DESKTOP_FRAME_HEIGHT }))
+    expect(options.frame).toBe(false)
+    expect(options).not.toHaveProperty('titleBarStyle')
+    expect(options).not.toHaveProperty('titleBarOverlay')
   })
 
   it('keeps the ordinary native frame as the Linux compatibility fallback', () => {
@@ -171,7 +172,7 @@ describe('compatibility BrowserWindow options', () => {
     expect(options).not.toHaveProperty('backgroundMaterial')
   })
 
-  it('uses the taller native caption and capability-gated material in extended mode', () => {
+  it('uses the taller frameless caption and capability-gated material in extended mode', () => {
     const extended = {
       ...spec,
       mode: 'extended' as const,
@@ -181,10 +182,11 @@ describe('compatibility BrowserWindow options', () => {
     const options = extendedWindowOptions(extended, {} as NativeImage, 'win32', preload)
 
     expect(options).toEqual(expect.objectContaining({
-      titleBarStyle: 'hidden',
-      titleBarOverlay: expect.objectContaining({ height: DESKTOP_FRAME_HEIGHT }),
+      frame: false,
       backgroundColor: '#202124',
     }))
+    expect(options).not.toHaveProperty('titleBarStyle')
+    expect(options).not.toHaveProperty('titleBarOverlay')
     expect(options).not.toHaveProperty('transparent')
     expect(options).not.toHaveProperty('backgroundMaterial')
     expect(DESKTOP_FRAME_HEIGHT).toBe(36)

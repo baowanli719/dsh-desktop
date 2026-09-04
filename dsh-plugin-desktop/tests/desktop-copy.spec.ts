@@ -29,6 +29,6 @@ describe('Desktop product copy', () => {
     expect(copy.updateCheckFailedTitle).toBe('无法检查更新')
     expect(copy.terminalErrorTitle).toBe('无法打开 DSH 终端')
     expect(copy.diagnosticsErrorTitle).toBe('无法导出诊断信息')
-    expect(copy.updateAvailableMessage('2.1.0')).toBe('DSH Desktop 2.1.0 已可用。')
+    expect(copy.updateAvailableMessage('2.1.0')).toBe('办公 Agent 2.1.0 已可用。')
   })
 })

@@ -1,0 +1,153 @@
+diff --git a/lib/client.js b/lib/client.js
+index 0c54082e4e1072dd1936ed2a8668bf718e10e85a..3427e126517f4f474dcbc9865503a1cddb0793b6 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -69,8 +69,38 @@ window.__ModuleLoader__.load({
+ 		* sessions-derived empty-Hero fact is active. Visible dialog chrome belongs
+ 		* to the step, so a mounted-but-deciding step paints nothing here.
+ 		*/
++		/** Desktop-owned display glyph kept local until the upstream slot accepts icons. */
++		function IconDesktopSettings({ size = 16, className }) {
++			return (0, react_jsx_runtime.jsxs)("svg", {
++				width: size,
++				height: size,
++				viewBox: "0 0 16 16",
++				fill: "none",
++				xmlns: "http://www.w3.org/2000/svg",
++				className,
++				"aria-hidden": "true",
++				children: [(0, react_jsx_runtime.jsx)("rect", {
++					x: "1.5",
++					y: "2.5",
++					width: "13",
++					height: "9",
++					rx: "1.5",
++					stroke: "currentColor",
++					strokeWidth: "1.25"
++				}), (0, react_jsx_runtime.jsx)("path", {
++					d: "M5 14h6M8 11.5V14",
++					stroke: "currentColor",
++					strokeWidth: "1.25",
++					strokeLinecap: "round"
++				})]
++			});
++		}
+ 		/** Nav glyph by section id; unknown ids fall back to the settings gear. */
+ 		function navIcon(id) {
++			if (id === "desktop") return (0, react_jsx_runtime.jsx)(IconDesktopSettings, {
++				className: SettingsRoot_module_css_default.navIcon,
++				size: 16
++			});
+ 			if (id === "models") return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconDataOutline16, {
+ 				className: SettingsRoot_module_css_default.navIcon,
+ 				size: 16
+@@ -173,7 +203,7 @@ window.__ModuleLoader__.load({
+ 		* @returns the settings shell element tree.
+ 		*/
+ 		function SettingsRoot(props) {
+-			const { wide, useSections, useOnboardingSteps, useSessions, renderSlot } = props;
++			const { wide, useSections, useOnboardingSteps, useSessions, renderSlot, settingsNavigation } = props;
+ 			const [open, setOpen] = (0, react.useState)(false);
+ 			const [activeId, setActiveId] = (0, react.useState)(void 0);
+ 			const [completedOnboarding, setCompletedOnboarding] = (0, react.useState)(() => /* @__PURE__ */ new Set());
+@@ -185,6 +215,11 @@ window.__ModuleLoader__.load({
+ 				setActiveId(id);
+ 				setOpen(true);
+ 			}, []);
++			const navigation = (0, react.useSyncExternalStore)(settingsNavigation.subscribe, settingsNavigation.getSnapshot, settingsNavigation.getSnapshot);
++			(0, react.useEffect)(() => {
++				if (navigation.requestId === 0) return;
++				openSection(navigation.sectionId);
++			}, [navigation.requestId, navigation.sectionId, openSection]);
+ 			const rows = useSections((s) => s);
+ 			const onboardingSteps = useOnboardingSteps((s) => s);
+ 			const onboardingActive = useSessions((state) => state.phase === "ready" && (state.current === void 0 || state.byId[state.current]?.blank === true));
+@@ -200,7 +235,7 @@ window.__ModuleLoader__.load({
+ 				});
+ 			}, []);
+ 			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+-				(0, react_jsx_runtime.jsx)("button", {
++				!navigation.externalLauncher && (0, react_jsx_runtime.jsx)("button", {
+ 					type: "button",
+ 					className: clsx(SettingsRoot_module_css_default.trigger, !wide && SettingsRoot_module_css_default.rail),
+ 					"aria-haspopup": "dialog",
+@@ -473,12 +508,58 @@ window.__ModuleLoader__.load({
+ 		* section, each once its slot declaration is on the ledger.
+ 		* @param ctx - client root context.
+ 		*/
++		function createSettingsNavigation() {
++			let requestId = 0;
++			let sectionId;
++			let externalLaunchers = 0;
++			let snapshot = {
++				requestId,
++				sectionId,
++				externalLauncher: false
++			};
++			const listeners = /* @__PURE__ */ new Set();
++			const publish = () => {
++				snapshot = {
++					requestId,
++					sectionId,
++					externalLauncher: externalLaunchers > 0
++				};
++				for (const listener of listeners) listener();
++			};
++			return {
++				open: (nextSectionId) => {
++					sectionId = nextSectionId;
++					requestId += 1;
++					publish();
++				},
++				claimExternalLauncher: () => {
++					let active = true;
++					externalLaunchers += 1;
++					publish();
++					return () => {
++						if (!active) return;
++						active = false;
++						externalLaunchers = Math.max(0, externalLaunchers - 1);
++						publish();
++					};
++				},
++				getSnapshot: () => snapshot,
++				subscribe: (listener) => {
++					listeners.add(listener);
++					return () => {
++						listeners.delete(listener);
++					};
++				}
++			};
++		}
+ 		function apply(ctx) {
+ 			ctx.effect(() => ctx.locale.register(NS, {
+ 				zh,
+ 				en
+ 			}), "ui-settings-general: dictionaries");
+ 			const t = ctx.locale.bind(NS);
++			const settingsNavigation = createSettingsNavigation();
++			ctx.provide("settingsNavigation", settingsNavigation);
+ 			const documentController = ctx.get("connection").isLoopback ? new SettingsDocumentStore(ctx.remote, ctx.settingsScope.describe()) : void 0;
+ 			const documentInjected = documentController === void 0 ? void 0 : () => ({
+ 				controller: documentController,
+@@ -492,7 +573,9 @@ window.__ModuleLoader__.load({
+ 			let rows = [];
+ 			let onboardingVersion = -1;
+ 			let onboardingSteps = [];
+-			const shellInjected = () => ({ hooks: {
++			const shellInjected = () => ({
++				settingsNavigation,
++				hooks: {
+ 				sections: {
+ 					getSnapshot: () => {
+ 						const version = ctx.slots.getVersion("settings.section");
+@@ -533,7 +616,8 @@ window.__ModuleLoader__.load({
+ 					},
+ 					subscribe: (listener) => ctx.slots.subscribe("settings.onboarding", listener)
+ 				}
+-			} });
++				}
++			});
+ 			ctx.slots.inject("sidebar.settings", () => ctx.slots.register({
+ 				name: "sidebar.settings",
+ 				children: {

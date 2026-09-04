@@ -13,6 +13,7 @@ import {
   DesktopVersionControl,
   selectDesktopFrameMode,
 } from '../src/client/ExtendedTitlebar.tsx'
+import { DesktopWindowControls } from '../src/client/DesktopWindowControls.tsx'
 import {
   desktopBrowserUrlsShouldRender,
   DesktopSettingsSection,
@@ -21,6 +22,9 @@ import {
   readDesktopSettingsUntilLanSettled,
   resolveDesktopLanConfirmation,
 } from '../src/client/DesktopSettingsSection.tsx'
+import { DesktopSkillsSection } from '../src/client/DesktopSkillsSection.tsx'
+import { DesktopAboutSection } from '../src/client/DesktopAboutSection.tsx'
+import { DesktopAccountMenu } from '../src/client/DesktopAccountMenu.tsx'
 import { DesktopTerminalSettingsAction } from '../src/client/DesktopTerminalSettingsAction.tsx'
 import {
   createDesktopSettingsApi,
@@ -322,6 +326,7 @@ describe('Desktop settings API', () => {
           openBrowser: true,
           networkExposure: 'lan' as const,
           logLevel: 'info' as const,
+          sessionLogButton: false,
         },
         base: undefined,
         user: undefined,
@@ -504,6 +509,36 @@ describe('Desktop native action presentation', () => {
     expect(markup).toContain('data-slot="hover-card-trigger"')
   })
 
+  it('renders the frameless Windows caption controls with accessible labels', () => {
+    const markup = renderToStaticMarkup(createElement(DesktopWindowControls, {
+      maximized: false,
+      onMinimize: vi.fn(),
+      onToggleMaximize: vi.fn(),
+      onClose: vi.fn(),
+      t,
+    }))
+
+    expect(markup.match(/dshDesktopWindowControlsButton/g)).toHaveLength(3)
+    expect(markup).toContain('aria-label="Minimize"')
+    expect(markup).toContain('aria-label="Maximize"')
+    expect(markup).toContain('aria-label="Close"')
+    expect(markup).toContain('dshDesktopWindowControlsClose')
+    expect(markup).not.toContain('aria-label="Restore"')
+  })
+
+  it('swaps the maximize glyph for restore while the window is maximized', () => {
+    const markup = renderToStaticMarkup(createElement(DesktopWindowControls, {
+      maximized: true,
+      onMinimize: vi.fn(),
+      onToggleMaximize: vi.fn(),
+      onClose: vi.fn(),
+      t,
+    }))
+
+    expect(markup).toContain('aria-label="Restore"')
+    expect(markup).not.toContain('aria-label="Maximize"')
+  })
+
   it('persists a presentation change before requesting the confirmed restart', async () => {
     const order: string[] = []
     const setMode = vi.fn(async (mode: string) => { order.push(`mode:${mode}`) })
@@ -581,7 +616,7 @@ describe('Desktop native action presentation', () => {
 })
 
 describe('Desktop settings Slot registration', () => {
-  it('registers the official Desktop section, native actions, and both settings scopes', async () => {
+  it('registers the official Desktop and skills sections, native actions, and both settings scopes', async () => {
     const scope = {
       getSnapshot: () => ({
         status: 'loading' as const,
@@ -601,6 +636,12 @@ describe('Desktop settings Slot registration', () => {
     const register = vi.fn(() => () => {})
     const inject = vi.fn((_name: string, mount: () => unknown) => mount())
     const localeRegister = vi.fn(() => () => {})
+    const settingsNavigation = {
+      open: vi.fn(),
+      claimExternalLauncher: vi.fn(() => () => {}),
+      getSnapshot: () => ({ requestId: 0, sectionId: undefined, externalLauncher: false }),
+      subscribe: () => () => {},
+    }
     const ctx = {
       settingsScope: { bind },
       locale: {
@@ -609,6 +650,7 @@ describe('Desktop settings Slot registration', () => {
       },
       effect: vi.fn(),
       slots: { inject, register },
+      settingsNavigation,
     } as unknown as ClientContext
 
     const control = applyDesktopSettings(ctx, {
@@ -640,9 +682,54 @@ describe('Desktop settings Slot registration', () => {
       micaSupported: false,
       setMode: expect.any(Function),
     })
+    expect(options.inject()).not.toHaveProperty('gsSkills')
     expect(component).toBe(DesktopSettingsSection)
 
-    const [actionOptions, actionComponent] = register.mock.calls[1] as unknown as [
+    const [skillsOptions, skillsComponent] = register.mock.calls[1] as unknown as [
+      { id: string; order: number; locale: string; label: () => string; inject: () => Record<string, unknown> },
+      unknown,
+    ]
+    expect(skillsOptions).toMatchObject({
+      name: 'settings.section',
+      id: 'desktop-skills',
+      order: 110,
+      locale: DESKTOP_SETTINGS_LOCALE_NAMESPACE,
+    })
+    expect(skillsOptions.label()).toBe(`${DESKTOP_SETTINGS_LOCALE_NAMESPACE}:skillsNav`)
+    expect(skillsOptions.inject()).toEqual({
+      gsSkills: expect.objectContaining({ readSkills: expect.any(Function) }),
+      gsBrand: expect.objectContaining({ readBrand: expect.any(Function) }),
+    })
+    expect(skillsComponent).toBe(DesktopSkillsSection)
+
+    const [aboutOptions, aboutComponent] = register.mock.calls[2] as unknown as [
+      { id: string; order: number; locale: string; label: () => string; inject: () => Record<string, unknown> },
+      unknown,
+    ]
+    expect(aboutOptions).toMatchObject({
+      name: 'settings.section',
+      id: 'desktop-about',
+      order: 120,
+      locale: DESKTOP_SETTINGS_LOCALE_NAMESPACE,
+    })
+    expect(aboutOptions.label()).toBe(`${DESKTOP_SETTINGS_LOCALE_NAMESPACE}:aboutNav`)
+    expect(aboutOptions.inject()).toMatchObject({ version: '2.0.3', api: expect.any(Object) })
+    expect(aboutComponent).toBe(DesktopAboutSection)
+
+    const [accountOptions, accountComponent] = register.mock.calls[3] as unknown as [
+      { id: string; order: number; locale: string; inject: () => Record<string, unknown> },
+      unknown,
+    ]
+    expect(accountOptions).toMatchObject({
+      name: 'sidebar.footer.action',
+      id: 'desktop-account-menu',
+      order: 1000,
+      locale: DESKTOP_SETTINGS_LOCALE_NAMESPACE,
+    })
+    expect(accountOptions.inject()).toMatchObject({ version: '2.0.3', settingsNavigation })
+    expect(accountComponent).toBe(DesktopAccountMenu)
+
+    const [actionOptions, actionComponent] = register.mock.calls[4] as unknown as [
       { id: string; order: number; locale: string; inject: () => Record<string, unknown> },
       unknown,
     ]

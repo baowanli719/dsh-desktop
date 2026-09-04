@@ -212,6 +212,18 @@ export interface DesktopRuntime {
   /** Toggle Developer Tools for the mounted renderer. */
   toggleDeveloperTools(): void
 
+  /** Minimize the mounted main window. */
+  minimizeWindow(): void
+
+  /** Toggle the mounted main window's maximized state. @returns the new maximized state. */
+  toggleWindowMaximize(): boolean
+
+  /** Close the mounted main window through the standard close flow. */
+  closeWindow(): void
+
+  /** Whether the mounted main window is currently maximized. */
+  isWindowMaximized(): boolean
+
   /** Export a diagnostics zip and reveal it in the system file manager. */
   exportDiagnostics(): Promise<void>
 
@@ -235,6 +247,9 @@ export interface DesktopRuntime {
 
   /** Request orderly Cordis teardown followed by an Electron relaunch. */
   requestRestart(): Promise<void>
+
+  /** Relaunch immediately after credentials are revoked, without a redundant confirmation. */
+  requestSignOutRestart?(): Promise<void>
 
   /** Request orderly teardown followed by a one-shot recovery-mode relaunch. */
   requestRecoveryRestart(): Promise<void>

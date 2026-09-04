@@ -1,4 +1,4 @@
-/** DSH Desktop Host plugin: owns the selected native shell generation. */
+/** gs-worker Host plugin: owns the selected native shell generation. */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { fileURLToPath } from 'node:url'
@@ -57,6 +57,41 @@ import {
   handleDesktopTerminalOpenRequest,
 } from './desktop-settings-route.ts'
 import type {} from './desktop-settings-controller.ts'
+import {
+  DESKTOP_WINDOW_CLOSE_PATH,
+  DESKTOP_WINDOW_MINIMIZE_PATH,
+  DESKTOP_WINDOW_STATE_PATH,
+  DESKTOP_WINDOW_TOGGLE_MAXIMIZE_PATH,
+  handleDesktopWindowCloseRequest,
+  handleDesktopWindowMinimizeRequest,
+  handleDesktopWindowStateRequest,
+  handleDesktopWindowToggleMaximizeRequest,
+} from './desktop-window-controls-route.ts'
+import {
+  GS_SERVER_BRAND_PATH,
+  GS_SERVER_CAPTCHA_PATH,
+  GS_SERVER_EMAIL_CODE_PATH,
+  GS_SERVER_EMAIL_LOGIN_PATH,
+  GS_SERVER_LOGIN_PATH,
+  GS_SERVER_LOGOUT_PATH,
+  GS_SERVER_META_PATH,
+  GS_SERVER_SESSION_PATH,
+  GS_SERVER_SKILLS_PATH,
+  type GsSkillsView,
+} from './server/gs-contract.ts'
+import {
+  handleGsBrandRequest,
+  handleGsCaptchaRequest,
+  handleGsEmailCodeRequest,
+  handleGsEmailLoginRequest,
+  handleGsLoginRequest,
+  handleGsLogoutRequest,
+  handleGsServerMetaRequest,
+  handleGsSessionRequest,
+  handleGsSkillsRequest,
+} from './server/gs-server-route.ts'
+import { SERVER_SKILL_PROVIDER_NAME } from './server-skill-provider.ts'
+import { currentBrand } from './brand.ts'
 import { DESKTOP_LAN_HTTPS_CA_PATH } from './lan-https-runtime.ts'
 import { desktopBootRecoveryInjections } from './desktop-boot-recovery.ts'
 import type { DesktopLocale, DesktopShellMode } from './runtime.ts'
@@ -127,6 +162,8 @@ export interface DesktopSettings {
   networkExposure: DesktopNetworkExposure
   /** Log verbosity threshold applied to the file logger. */
   logLevel: 'debug' | 'info' | 'warn' | 'error'
+  /** Whether the session header shows the upstream session-log export action. */
+  sessionLogButton: boolean
 }
 
 /** Schema registered with the standard settings service. */
@@ -138,6 +175,7 @@ export const DesktopSettingsSchema: z<DesktopSettings> = z.object({
   openBrowser: z.boolean().default(false),
   networkExposure: z.union(['loopback', 'lan'] as const).default('loopback'),
   logLevel: z.union(['debug', 'info', 'warn', 'error'] as const).default('info'),
+  sessionLogButton: z.boolean().default(false),
 })
 
 /** Native window configuration. */
@@ -215,8 +253,8 @@ export function apply(ctx: Context, config: Config): void {
   const runtime = ctx.get('desktopRuntime')
   if (runtime === undefined) {
     process.stderr.write(
-      'dsh-plugin-desktop: this profile is composed with the DSH Desktop shell, which requires the desktop launcher (desktopRuntime).\n'
-      + 'Start it with `dsh-desktop`, or select this profile inside the packaged DSH Desktop application.\n'
+      'dsh-plugin-desktop: this profile is composed with the gs-worker shell, which requires the desktop launcher (desktopRuntime).\n'
+      + 'Start it with `dsh-desktop`, or select this profile inside the packaged gs-worker application.\n'
       + 'The desktop terminal, profile, and update rows stay inactive in an ordinary DSH boot.\n',
     )
     return
@@ -331,6 +369,92 @@ export function apply(ctx: Context, config: Config): void {
       )
     }
   }
+  const gsServer = ctx.get('gsServer')
+  if (gsServer !== undefined) {
+    const reportGsError = (operation: string, cause: unknown): void => {
+      ctx.logger.error(
+        `dsh-plugin-desktop: failed to ${operation}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      )
+    }
+    const gsRoutes = [
+      [GS_SERVER_META_PATH, handleGsServerMetaRequest],
+      [GS_SERVER_SESSION_PATH, handleGsSessionRequest],
+      [GS_SERVER_BRAND_PATH, handleGsBrandRequest],
+      [GS_SERVER_CAPTCHA_PATH, handleGsCaptchaRequest],
+      [GS_SERVER_LOGIN_PATH, handleGsLoginRequest],
+      [GS_SERVER_EMAIL_CODE_PATH, handleGsEmailCodeRequest],
+      [GS_SERVER_EMAIL_LOGIN_PATH, handleGsEmailLoginRequest],
+    ] as const
+    for (const [path, handler] of gsRoutes) {
+      ctx.effect(
+        () => ctx.webServer.register({
+          kind: 'exact',
+          path,
+          handler: (req, res) => {
+            if (rejectDesktopRequest(ctx, req, res)) return
+            return handler(req, res, rendererOrigin, gsServer, reportGsError)
+          },
+        }),
+        `dsh-plugin-desktop: private gs-server route ${path}`,
+      )
+    }
+    ctx.effect(
+      () => ctx.webServer.register({
+        kind: 'exact',
+        path: GS_SERVER_LOGOUT_PATH,
+        handler: (req, res) => {
+          if (rejectDesktopRequest(ctx, req, res)) return
+          return handleGsLogoutRequest(
+            req,
+            res,
+            rendererOrigin,
+            gsServer,
+            reportGsError,
+            () => {
+              setImmediate(() => {
+                void runtime.requestSignOutRestart?.().catch((cause: unknown) => {
+                  reportGsError('restart after gs-server logout', cause)
+                })
+              })
+            },
+          )
+        },
+      }),
+      `dsh-plugin-desktop: private gs-server route ${GS_SERVER_LOGOUT_PATH}`,
+    )
+    // The skills view resolves the registry and the sync tracker per request,
+    // so the route never depends on plugin load order.
+    const readGsSkillsView = async (): Promise<GsSkillsView> => {
+      const skills = ctx.get('skills')
+      const sync = ctx.get('gsSkillSync')
+      if (skills === undefined || sync === undefined) return { status: 'idle', skills: [] }
+      // Listing through the registry refreshes the tracker on a real fetch and
+      // otherwise serves the cached revision; a throw surfaces as a 500.
+      const summaries = await skills.list({})
+      const state = sync.snapshot()
+      const lite = new Map((state.skills ?? []).map(item => [item.name, item]))
+      return {
+        status: state.status,
+        ...(state.syncedAt === undefined ? {} : { syncedAt: state.syncedAt }),
+        ...(state.masterOff === undefined ? {} : { masterOff: state.masterOff }),
+        ...(state.switchedOff === undefined ? {} : { switchedOff: state.switchedOff }),
+        skills: summaries
+          .filter(summary => summary.provider === SERVER_SKILL_PROVIDER_NAME)
+          .map(summary => lite.get(summary.name) ?? { name: summary.name, description: summary.description }),
+      }
+    }
+    ctx.effect(
+      () => ctx.webServer.register({
+        kind: 'exact',
+        path: GS_SERVER_SKILLS_PATH,
+        handler: (req, res) => {
+          if (rejectDesktopRequest(ctx, req, res)) return
+          return handleGsSkillsRequest(req, res, rendererOrigin, readGsSkillsView, reportGsError)
+        },
+      }),
+      `dsh-plugin-desktop: private gs-server route ${GS_SERVER_SKILLS_PATH}`,
+    )
+  }
   ctx.effect(
     () => ctx.webServer.register({
       kind: 'exact',
@@ -348,6 +472,30 @@ export function apply(ctx: Context, config: Config): void {
     'dsh-plugin-desktop: renderer boot report route',
   )
   if (runtime.platform === 'win32') {
+    const reportWindowError = (operation: string, cause: unknown): void => {
+      ctx.logger.error(
+        `dsh-plugin-desktop: failed to ${operation}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      )
+    }
+    const windowControlRoutes = [
+      [DESKTOP_WINDOW_STATE_PATH, handleDesktopWindowStateRequest],
+      [DESKTOP_WINDOW_MINIMIZE_PATH, handleDesktopWindowMinimizeRequest],
+      [DESKTOP_WINDOW_TOGGLE_MAXIMIZE_PATH, handleDesktopWindowToggleMaximizeRequest],
+      [DESKTOP_WINDOW_CLOSE_PATH, handleDesktopWindowCloseRequest],
+    ] as const
+    for (const [path, handler] of windowControlRoutes) {
+      ctx.effect(
+        () => ctx.webServer.register({
+          kind: 'exact',
+          path,
+          handler: (req, res) => {
+            if (rejectDesktopRequest(ctx, req, res)) return
+            return handler(req, res, rendererOrigin, runtime, reportWindowError)
+          },
+        }),
+        `dsh-plugin-desktop: private window-control route ${path}`,
+      )
+    }
     ctx.effect(
       () => ctx.webServer.register({
         kind: 'exact',
@@ -474,8 +622,8 @@ export function apply(ctx: Context, config: Config): void {
         url,
         authenticationUrl: ctx.connection.authenticatedUrl(new URL(url).origin),
         rendererAccessHeader: browserAccess.rendererHeader,
-        productName: 'DSH Desktop',
-        windowTitle: 'DeepSeek Harness Desktop',
+        productName: 'gs-worker',
+        windowTitle: currentBrand().name,
         iconPath,
         trayIcons,
         readLocalePreference: () => {

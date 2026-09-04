@@ -2,13 +2,16 @@
 
 import { createPortal } from 'react-dom'
 import { LayoutTemplate, PanelTop, RefreshCw, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import type {
   InjectFace, PropsLocale, PropsRuntime,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DesktopSettingsApi } from './desktop-settings-api.ts'
 import type { DesktopClientEnvironment, DesktopClientMode } from './environment.ts'
 import { DesktopNativeActions } from './DesktopNativeActions.tsx'
+import { DesktopWindowControls } from './DesktopWindowControls.tsx'
+import type { DesktopWindowControlsApi } from './window-controls-api.ts'
 import { Button } from '../native-ui/components/ui/button.tsx'
 import type { DesktopSettingsLocaleKey } from './desktop-settings-locales.ts'
 import {
@@ -23,6 +26,7 @@ export interface DesktopFrameTitlebarInjected {
     DesktopSettingsApi,
     'openTerminal' | 'restart' | 'restartToRecovery' | 'reloadRenderer' | 'toggleDeveloperTools' | 'checkForUpdates'
   >
+  readonly windowControls: DesktopWindowControlsApi
   readonly setMode: (mode: DesktopClientMode) => Promise<void>
 }
 
@@ -169,27 +173,76 @@ export function DesktopModeControl({
 }
 
 /** Horizontal frame surface; the unrelated upstream content starts below it. */
-export function DesktopFrameTitlebar({ api, environment, setMode, t }: DesktopFrameTitlebarProps) {
+export function DesktopFrameTitlebar({ api, environment, setMode, t, windowControls }: DesktopFrameTitlebarProps) {
+  const win32 = environment.platform === 'win32'
+  const [maximized, setMaximized] = useState(false)
+  useEffect(() => {
+    if (!win32) return
+    let resizeTimer: number | undefined
+    const refresh = (): void => {
+      void windowControls.readState()
+        .then(state => { setMaximized(state.maximized) })
+        .catch(() => {})
+    }
+    const refreshAfterResize = (): void => {
+      window.clearTimeout(resizeTimer)
+      resizeTimer = window.setTimeout(refresh, 100)
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    window.addEventListener('resize', refreshAfterResize)
+    return () => {
+      window.clearTimeout(resizeTimer)
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('resize', refreshAfterResize)
+    }
+  }, [win32, windowControls])
+  const toggleMaximize = (): void => {
+    void windowControls.toggleMaximize()
+      .then(setMaximized)
+      .catch(() => {})
+  }
+  // frame:false drops the native caption double-click; restore it on the drag strip.
+  const toggleMaximizeOnDoubleClick = (event: ReactMouseEvent<HTMLElement>): void => {
+    if (!win32) return
+    if ((event.target as HTMLElement).closest('button, a, input, textarea, select, label, [role="button"]')) return
+    toggleMaximize()
+  }
   return createPortal((
     <header
       className="dshDesktopFrameTitlebar"
       data-dsh-desktop-frame="titlebar"
       data-platform={environment.platform}
       data-material={environment.material}
+      data-controls-only={win32 || undefined}
+      onDoubleClick={toggleMaximizeOnDoubleClick}
     >
-      <div className="dshDesktopFrameIdentity">
-        <span className="dshDesktopFrameProduct">DSH Desktop</span>
-        <DesktopVersionControl version={environment.version} checkForUpdates={api.checkForUpdates} t={t} />
-        <DesktopModeControl
-          mode={environment.mode}
-          setMode={setMode}
-          restart={api.restart}
+      {!win32 && (
+        <>
+          <div className="dshDesktopFrameIdentity">
+            <span className="dshDesktopFrameProduct">gs-worker</span>
+            <DesktopVersionControl version={environment.version} checkForUpdates={api.checkForUpdates} t={t} />
+            <DesktopModeControl
+              mode={environment.mode}
+              setMode={setMode}
+              restart={api.restart}
+              t={t}
+            />
+          </div>
+          <div className="dshDesktopFrameActions">
+            <DesktopNativeActions api={api} t={t} placement="titlebar" />
+          </div>
+        </>
+      )}
+      {win32 && (
+        <DesktopWindowControls
+          maximized={maximized}
+          onMinimize={() => { void windowControls.minimize().catch(() => {}) }}
+          onToggleMaximize={toggleMaximize}
+          onClose={() => { void windowControls.close().catch(() => {}) }}
           t={t}
         />
-      </div>
-      <div className="dshDesktopFrameActions">
-        <DesktopNativeActions api={api} t={t} placement="titlebar" />
-      </div>
+      )}
     </header>
   ), document.body)
 }

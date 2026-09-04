@@ -3,6 +3,7 @@
 import {
   EXTENDED_INNER_CORNER_RADIUS,
   DESKTOP_FRAME_HEIGHT,
+  DESKTOP_FRAME_HEIGHT_WIN32,
   MACOS_TRAFFIC_LIGHT_SAFE_WIDTH,
   WINDOWS_CAPTION_CONTROLS_WIDTH,
 } from '../window-chrome.ts'
@@ -33,6 +34,48 @@ body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extende
   padding-top: 0;
   overflow: hidden;
   transform: translateZ(0);
+}
+/* Windows has no visible client header. Let each application column paint
+   through the caption band, then reserve that height inside the column so
+   ordinary controls never sit underneath the drag surface. The renderer's
+   [data-slot="root"] anchor (display:contents) sits between the viewport
+   and the upstream frame, so the frame is matched by descendant :has — a
+   child combinator here silently matches nothing and the columns slide
+   under the caption buttons. Desktop-owned frames render their overlay
+   through a slot anchor instead, so they never match this rule. */
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] #root {
+  top: 0;
+}
+/* Compress the Windows caption band: 28px still fits the caption glyphs, and
+   every consumer reads the var, so the column reservation, the overlay, and
+   the dialog offsets shrink together. The titlebar element itself carries a
+   literal height and follows below. */
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] {
+  --dsh-desktop-frame-height: ${DESKTOP_FRAME_HEIGHT_WIN32}px;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"]
+  .dshDesktopFrameTitlebar {
+  height: ${DESKTOP_FRAME_HEIGHT_WIN32}px;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"]
+  [data-dsh-desktop-content-viewport] :has(> [data-shell-overlay])
+  > div:not([data-shell-overlay]):not([data-side]) {
+  box-sizing: border-box;
+  padding-top: 0;
+}
+body[data-dsh-desktop-mode="extended"][data-dsh-desktop-platform="win32"]
+  :is(.dshDesktopSidebarSurface, .dshDesktopConversationSurface) {
+  box-sizing: border-box;
+  padding-top: 0;
+}
+body[data-dsh-desktop-mode="extended"][data-dsh-desktop-platform="win32"]
+  .dshDesktopDetailsSurface {
+  box-sizing: border-box;
+  padding-top: var(--dsh-desktop-frame-height);
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"]
+  [data-shell-overlay] {
+  top: var(--dsh-desktop-frame-height);
 }
 /* The custom frame owns the top band. A shell overlay is the containing block
    for fixed plugin surfaces, so they cannot escape into Desktop chrome. */
@@ -94,11 +137,11 @@ body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extende
   [data-dsh-desktop-frame="titlebar"] {
   isolation: isolate;
 }
-body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-material="off"] {
-  --dsh-desktop-frame-fill: var(--dsw-alias-bg-layer-1);
+body[data-dsh-desktop-mode="compatibility"] {
+  --dsh-desktop-frame-fill: var(--dsw-alias-bg-base);
 }
-body[data-dsh-desktop-mode="compatibility"]:not([data-dsh-desktop-material="off"]) {
-  --dsh-desktop-frame-fill: color-mix(in srgb, var(--dsw-alias-bg-base) 54%, transparent);
+body[data-dsh-desktop-mode="extended"][data-dsh-desktop-material="off"] {
+  --dsh-desktop-frame-fill: var(--dsw-alias-bg-layer-1);
 }
 body[data-dsh-desktop-mode="extended"]:not([data-dsh-desktop-material="off"]) {
   --dsh-desktop-frame-fill: color-mix(in srgb, var(--dsw-alias-bg-base) 18%, transparent);
@@ -122,7 +165,10 @@ body[data-dsh-desktop-mode="extended"]:not([data-dsh-desktop-material="off"]) {
   padding: 0 8px 0 ${MACOS_TRAFFIC_LIGHT_SAFE_WIDTH + 8}px;
 }
 .dshDesktopFrameTitlebar[data-platform="win32"] {
-  padding: 0 ${WINDOWS_CAPTION_CONTROLS_WIDTH + 8}px 0 8px;
+  padding: 0 0 0 8px;
+  background: transparent;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
 }
 .dshDesktopFrameIdentity {
   position: absolute;
@@ -325,6 +371,42 @@ body[data-dsh-desktop-mode="extended"]:not([data-dsh-desktop-material="off"]) {
 }
 .dshDesktopFrameTitlebar[data-platform="darwin"] .dshDesktopFrameActions { margin-left: auto; }
 .dshDesktopFrameTitlebar[data-platform="win32"] .dshDesktopFrameActions { margin-right: auto; }
+.dshDesktopWindowControls {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  margin-left: auto;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.dshDesktopWindowControlsButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: ${WINDOWS_CAPTION_CONTROLS_WIDTH / 3}px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: default;
+  font: inherit;
+  -webkit-app-region: no-drag;
+}
+.dshDesktopWindowControlsButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.dshDesktopWindowControlsButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+.dshDesktopWindowControlsClose:hover,
+.dshDesktopWindowControlsClose:focus-visible {
+  background: var(--dsw-alias-state-error-primary);
+  color: #ffffff;
+}
+.dshDesktopWindowControlsButton svg { width: 10px; height: 10px; stroke-width: 1; }
 .dshDesktopNativeActions { display: flex; align-items: center; gap: 6px; -webkit-app-region: no-drag; }
 .dshDesktopNativeActions[data-placement="titlebar"] {
   position: relative;
@@ -408,6 +490,45 @@ body[data-dsh-desktop-mode="extended"]:not([data-dsh-desktop-material="off"]) {
   font-size: 11px;
   line-height: 1.4;
 }
+/* better-sidebar pins its panel toggle cluster to the viewport's top-right
+   corner — inside the Desktop caption band, where the fixed titlebar layer
+   swallows its clicks. Drop the cluster onto the session header's utility
+   row (frame height + 4px header padding + 2px centering against the 32px
+   pill) and reserve its width in the header's right padding so the utility
+   content yields to it. */
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [data-slot="conversation"] header {
+  padding-top: 20px;
+  padding-right: 78px;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"][data-dsh-sidebar-collapsed] [data-slot="conversation"] header {
+  padding-right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 12}px;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [data-slot="conversation"] header > :first-child {
+  -webkit-app-region: drag;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [data-slot="conversation"] header :is(button, a, input, textarea, select, [role="button"]) {
+  -webkit-app-region: no-drag;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [class*="toggleCluster"] {
+  right: calc(var(--dsh-sidebar-width, 0px) + 10px);
+  transition: right var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"][data-dsh-sidebar-dragging] [class*="toggleCluster"] {
+  transition: none;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="darwin"] [data-slot="conversation"] header {
+  padding-top: 4px;
+  padding-right: 98px;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="darwin"] [class*="toggleCluster"] {
+  top: 42px;
+}
+/* Slash/plus trigger menu: upstream pins both edges to the composer card
+   (712-952px on wide windows). Keep the left edge flush and cap the width.
+   The menu stylesheet is injected at module-load time — after this tag — so
+   the override needs higher specificity than the module's single-class
+   selector rather than relying on order. */
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"]) [data-trigger-menu] { right: auto; width: min(280px, 100%); }
 `
 
 export function installExtendedStyles(): () => void {

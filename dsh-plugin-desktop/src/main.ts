@@ -1,4 +1,4 @@
-/** DSH Desktop executable: minimal Electron bootstrap around the Host Cordis root. */
+/** gs-worker executable: minimal Electron bootstrap around the Host Cordis root. */
 
 import { app, crashReporter, safeStorage, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
@@ -44,6 +44,7 @@ import type {
   DesktopLifecycleRendererFailureReason,
 } from './lifecycle-events.ts'
 import { FileExporter } from './file-exporter.ts'
+import { GsLogExporter } from './server/gs-log-exporter.ts'
 import { DESKTOP_SETTINGS_NAMESPACE, type DesktopSettings } from './index.ts'
 import {
   desktopLanBrowserUrls,
@@ -85,6 +86,14 @@ import {
   type DesktopMarketSnapshot,
 } from './desktop-market.ts'
 import DesktopSettingsController from './desktop-settings-controller.ts'
+import { gsClientPlatform, type GsSafeStorage } from './server/gs-auth.ts'
+import { GsLlmProxyServer } from './server/gs-llm-proxy.ts'
+import {
+  gsLlmProxyLaunchEnvironment,
+  mirrorGsLlmModelSettings,
+  planGsLlmModelProfile,
+} from './server/gs-llm-models.ts'
+import GsServerService from './server/gs-server-service.ts'
 import {
   clearDesktopProfilePreferences,
   readDesktopProfilePreferences,
@@ -127,6 +136,8 @@ import {
 } from './setup-wizard-settings.ts'
 import type { DesktopSetupWizardResult } from './setup-wizard-contract.ts'
 import { DesktopSetupWizardWindow } from './setup-wizard-window.ts'
+import type { DesktopLoginResult } from './login-contract.ts'
+import { DesktopLoginWindow } from './login-window.ts'
 import {
   formatProfileMaterializationFailure,
   materializeProfile,
@@ -167,7 +178,7 @@ import {
 import { windowsSupportsMica } from './window-material.ts'
 
 const BIN_NAME = 'dsh-plugin-desktop'
-const PRODUCT_NAME = 'DSH Desktop'
+const PRODUCT_NAME = 'gs-worker'
 
 /** Require OS-backed secret storage; Linux's plaintext fallback is not sufficient for a CA key. */
 function desktopLanHttpsPrivateKeyProtector(): DesktopLanHttpsPrivateKeyProtector {
@@ -180,6 +191,20 @@ function desktopLanHttpsPrivateKeyProtector(): DesktopLanHttpsPrivateKeyProtecto
     },
     seal: plaintext => safeStorage.encryptString(Buffer.from(plaintext).toString('utf8')),
     open: sealed => Buffer.from(safeStorage.decryptString(Buffer.from(sealed)), 'utf8'),
+  }
+}
+
+/** OS-backed storage for the gsclaw-server refresh token, mirroring the CA-key bar. */
+function desktopGsSafeStorage(): GsSafeStorage {
+  return {
+    available: () => {
+      if (!safeStorage.isEncryptionAvailable()) return false
+      if (process.platform !== 'linux') return true
+      const backend = safeStorage.getSelectedStorageBackend()
+      return backend !== 'basic_text' && backend !== 'unknown'
+    },
+    encrypt: plaintext => safeStorage.encryptString(plaintext),
+    decrypt: sealed => safeStorage.decryptString(Buffer.from(sealed)),
   }
 }
 
@@ -339,11 +364,14 @@ async function start(): Promise<void> {
   let removeUncaughtExceptionLogging: (() => void) | undefined
   let removeChildProcessLogging: (() => void) | undefined
   let fileExporter: FileExporter | undefined
+  let gsLogExporter: GsLogExporter | undefined
   let runtime!: ElectronDesktopRuntime
   let logSink: LogFileSink | undefined
   let startupRecoveryController: DesktopStartupRecoveryController | undefined
   let startupRecoveryWindow: DesktopStartupRecoveryWindow | undefined
   let setupWizardWindow: DesktopSetupWizardWindow | undefined
+  let loginWindow: DesktopLoginWindow | undefined
+  let preBootGsServer: GsServerService | undefined
   let startupRecoveryConfigurationPaths: DesktopStartupRecoveryConfigurationPaths | undefined
   let profileCheckpoint: DesktopProfileCheckpoint | undefined
   let startupRecoveryProfileActions: DesktopStartupRecoveryProfileActions | undefined
@@ -460,7 +488,11 @@ async function start(): Promise<void> {
   }, electronLogger, undefined, undefined, installationId)
   const finalExit = (code: number): void => { nativeExit.finish(code) }
   shutdown = createDesktopShutdown(
-    async () => { await generation.release() },
+    async () => {
+      await generation.release()
+      // Best-effort final log upload; internally bounded by a short timeout.
+      await gsLogExporter?.close()
+    },
     finalExit,
   )
   const requestQuit = (code: number): void => { void shutdown.request(code) }
@@ -511,6 +543,10 @@ async function start(): Promise<void> {
       setupWizardWindow.show()
       return true
     }
+    if (loginWindow !== undefined) {
+      loginWindow.show()
+      return true
+    }
     if (startupRecoveryWindow !== undefined) {
       startupRecoveryWindow.show()
       return true
@@ -530,7 +566,7 @@ async function start(): Promise<void> {
     await app.whenReady()
     startupStage = 'shell-environment'
     lifecycleRecorder.transitionStartupStage(startupStage)
-    if (process.platform === 'win32') app.setAppUserModelId('ai.deepseek.dsh.desktop')
+    if (process.platform === 'win32') app.setAppUserModelId('com.enterprise.officeagent')
     if (app.isPackaged && process.cwd() === '/') process.chdir(app.getPath('home'))
     const shellEnvironmentResolution = await resolveDesktopShellEnvironment({
       environment: process.env,
@@ -889,6 +925,106 @@ async function start(): Promise<void> {
         )
       }
     }
+    // Stage C login gate: without a valid gsclaw-server session the shell
+    // cannot boot. Load the Host-owned client early so a successful login
+    // flows straight into the same GsServerService the Host later provides.
+    preBootGsServer = await GsServerService.load({
+      userDataDir: app.getPath('userData'),
+      safeStorage: desktopGsSafeStorage(),
+      client: { platform: gsClientPlatform(process.platform), version: appVersion },
+      onSessionLost: reason => {
+        // TODO(stage-c): an in-flight session loss only logs. Kicking the
+        // running shell back to the login window needs a full relaunch flow;
+        // logout already wipes local credential state, so the next launch
+        // returns to this gate on its own.
+        electronLogger.error(
+          `${BIN_NAME}: gsclaw-server session lost (${reason}); signing in again is required`,
+        )
+      },
+    })
+    // A transport failure keeps the persisted token; the login window still
+    // opens and renders its offline state instead of booting sessionless.
+    const sessionRestored = await preBootGsServer.restoreSession().catch((cause: unknown) => {
+      electronLogger.error(
+        `${BIN_NAME}: gsclaw-server session could not be restored: ${cause instanceof Error ? cause.message : String(cause)}`,
+      )
+      return false
+    })
+    if (!sessionRestored) {
+      loginWindow = new DesktopLoginWindow({
+        locale: desktopLocaleFromLanguageTag(app.getLocale()),
+        input: { platform: runtime.platform, clientVersion: appVersion },
+        service: preBootGsServer,
+        reportError: (operation, cause) => {
+          electronLogger.error(
+            `${BIN_NAME}: failed to ${operation}: ${cause instanceof Error ? cause.message : String(cause)}`,
+          )
+        },
+      })
+      let loginResult: DesktopLoginResult
+      try {
+        loginResult = await loginWindow.run()
+      } finally {
+        loginWindow = undefined
+      }
+      if (loginResult.action === 'quit') {
+        startupRecoveryController?.dispose()
+        startupRecoveryController = undefined
+        await shutdown.request(0)
+        return
+      }
+    }
+    // Stage F server-mediated model access: start the loopback LLM proxy over
+    // the live session, mirror the server-pushed model plan into the settings
+    // document, and re-compose the Profile so the default-model row and the
+    // launch environment line up before the Host boots.
+    startupStage = 'profile-composition'
+    lifecycleRecorder.transitionStartupStage(startupStage)
+    if (preBootGsServer === undefined) {
+      throw new Error(`${BIN_NAME}: gsclaw-server client was not initialized before model wiring`)
+    }
+    const gsLlmServer = preBootGsServer
+    const gsLlmProxy = new GsLlmProxyServer({
+      endpoint: () => gsLlmServer.endpoints.resolve(),
+      session: gsLlmServer.auth,
+      onError: line => { electronLogger.error(line) },
+    })
+    await gsLlmProxy.start()
+    generation.own(() => { void gsLlmProxy.close() })
+    let gsClientConfig = gsLlmServer.clientConfig()
+    if (gsClientConfig === undefined) {
+      gsClientConfig = await gsLlmServer.getClientConfig()
+        .then(snapshot => snapshot.config)
+        .catch((cause: unknown) => {
+          electronLogger.error(
+            `${BIN_NAME}: gsclaw-server ClientConfig could not be pulled: ${cause instanceof Error ? cause.message : String(cause)}`,
+          )
+          return undefined
+        })
+    }
+    if (gsClientConfig?.features.customModel === true) {
+      // apiKey never leaves the server, so this product cannot honor
+      // user-supplied provider keys; the proxy path stays regardless.
+      electronLogger.error(
+        `${BIN_NAME}: server ClientConfig enables customModel, but every LLM call stays on the gsclaw-server proxy; custom model settings remain disabled`,
+      )
+    }
+    const gsLlmPlan = planGsLlmModelProfile({
+      models: gsClientConfig?.models,
+      proxyOrigin: gsLlmProxy.origin,
+    })
+    for (const warning of gsLlmPlan.warnings) electronLogger.error(`${BIN_NAME}: ${warning}`)
+    await mirrorGsLlmModelSettings(prepared.settingsDocument, gsLlmPlan)
+    prepared = prepareDesktopProfile(
+      process.env.DSH_TELEMETRY_DISABLED,
+      homeDir,
+      process.platform,
+      activeProfileName,
+      pluginManagementStatePath,
+      marketSelection,
+      preparationHooks,
+      gsLlmPlan.defaultModel === undefined ? {} : { defaultModel: gsLlmPlan.defaultModel },
+    )
     if (profileCheckpoint === undefined) {
       try {
         profileCheckpoint = new DesktopProfileCheckpoint({
@@ -1058,11 +1194,35 @@ async function start(): Promise<void> {
           () => releasePackageResolver,
           'dsh-plugin-desktop: profile package resolution',
         )
-        hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
+        // The per-boot proxy token resolves only through this in-memory
+        // snapshot: never written to disk, never materialized into
+        // process.env, so sandboxed tool subprocesses cannot inherit it.
+        hostCtx.provide(
+          DSH_LAUNCH_ENVIRONMENT_KEY,
+          gsLlmProxyLaunchEnvironment(environment, gsLlmProxy.token),
+        )
         hostCtx.provide('desktopBrowserAccess', browserAccess)
         hostCtx.provide('desktopLanHttps', lanHttps)
         hostCtx.provide('desktopRuntime', runtime)
         hostCtx.provide('desktopPnpmBootstrap', desktopPnpmBootstrap)
+        // The login gate loads the gsclaw-server client before boot; reuse its
+        // live session and ClientConfig cache instead of reloading state.
+        const gsServer = preBootGsServer ?? await GsServerService.load({
+          userDataDir: app.getPath('userData'),
+          safeStorage: desktopGsSafeStorage(),
+          client: { platform: gsClientPlatform(process.platform), version: appVersion },
+          onSessionLost: reason => {
+            hostCtx.logger.error(
+              `${BIN_NAME}: gsclaw-server session lost (${reason}); signing in again is required`,
+            )
+          },
+        })
+        hostCtx.provide('gsServer', gsServer)
+        void gsServer.restoreSession().catch((cause: unknown) => {
+          hostCtx.logger.error(
+            `${BIN_NAME}: gsclaw-server session could not be restored: ${cause instanceof Error ? cause.message : String(cause)}`,
+          )
+        })
         await hostCtx.plugin(DesktopActionsService, {
           openTerminal: () => { runtime.openTerminal() },
           requestRestart: () => runtime.requestRestart(),
@@ -1079,6 +1239,22 @@ async function start(): Promise<void> {
           fileExporter = new FileExporter(logSink)
           hostCtx.logger.exporter(fileExporter)
         }
+        // Stage G: batch client runtime logs to gsclaw-server alongside the
+        // local file exporter. `ctx.logger.exporter` holds a Map of sinks, so
+        // both exporters receive every message. Uploader diagnostics go
+        // straight to the file sink to avoid recursing through ctx.logger.
+        gsLogExporter = new GsLogExporter({
+          endpoint: () => gsServer.endpoints.resolve(),
+          session: gsServer.auth,
+          localLog: (level, line) => {
+            try {
+              logSink?.write(level, line)
+            } catch {
+              // Upload diagnostics are best-effort.
+            }
+          },
+        })
+        hostCtx.logger.exporter(gsLogExporter)
         await hostCtx.plugin(DesktopProfileService, {
           current: {
             name: activeProfileName,
@@ -1203,10 +1379,35 @@ async function start(): Promise<void> {
       throw cause
     })
     generation.bindHost(ctx)
-    fileExporter?.setThreshold((ctx.settings.get(DESKTOP_SETTINGS_NAMESPACE) as DesktopSettings | undefined)?.logLevel ?? 'info')
+    // ClientConfig pushes re-mirror the model sections; the settings document
+    // is hot-reloaded, so provider routes and the default model follow live.
+    const unsubscribeGsLlmMirror = gsLlmServer.config.subscribe((snapshot) => {
+      try {
+        const nextPlan = planGsLlmModelProfile({
+          models: snapshot?.config.models,
+          proxyOrigin: gsLlmProxy.origin,
+        })
+        void mirrorGsLlmModelSettings(prepared.settingsDocument, nextPlan).catch((cause: unknown) => {
+          ctx.logger.error(
+            `${BIN_NAME}: failed to mirror gsclaw-server model settings: ${cause instanceof Error ? cause.message : String(cause)}`,
+          )
+        })
+      } catch (cause: unknown) {
+        // A push landing while the generation is tearing down must not fault
+        // the release path (the proxy origin is gone by then).
+        electronLogger.error(
+          `${BIN_NAME}: gsclaw-server ClientConfig push could not be planned: ${cause instanceof Error ? cause.message : String(cause)}`,
+        )
+      }
+    })
+    generation.own(unsubscribeGsLlmMirror)
+    const initialLogLevel = (ctx.settings.get(DESKTOP_SETTINGS_NAMESPACE) as DesktopSettings | undefined)?.logLevel ?? 'info'
+    fileExporter?.setThreshold(initialLogLevel)
+    gsLogExporter?.setThreshold(initialLogLevel)
     ctx.on('settings/updated', (namespace, next) => {
       if (namespace === DESKTOP_SETTINGS_NAMESPACE) {
         fileExporter?.setThreshold((next as DesktopSettings).logLevel)
+        gsLogExporter?.setThreshold((next as DesktopSettings).logLevel)
       }
       if (namespace !== DESKTOP_SETTINGS_NAMESPACE
         && namespace !== DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE) return

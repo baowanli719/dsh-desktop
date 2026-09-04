@@ -97,6 +97,7 @@
 
 .dshNativeFrame[data-platform="darwin"] { padding: 0 8px 0 88px; }
 .dshNativeFrame[data-platform="win32"] { padding: 0 146px 0 8px; }
+.dshLoginSurface .dshNativeFrame { border-bottom: none; }
 .dshNativeContent {
   box-sizing: border-box;
   padding-top: calc(var(--spacing) * 5);

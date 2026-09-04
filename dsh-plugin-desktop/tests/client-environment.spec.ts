@@ -22,6 +22,7 @@ import {
   ADVANCED_MACOS_DRAG_REGION_HEIGHT,
   ADVANCED_WINDOWS_TITLEBAR_HEIGHT,
   DESKTOP_FRAME_HEIGHT,
+  DESKTOP_FRAME_HEIGHT_WIN32,
   MACOS_TRAFFIC_LIGHT_SAFE_WIDTH,
   WINDOWS_CAPTION_CONTROLS_WIDTH,
 } from '../src/window-chrome.ts'
@@ -157,11 +158,20 @@ describe('advanced desktop layout', () => {
       expect(css).not.toMatch(/html:has\(\[aria-modal="true"\]\) \.dshDesktopSidebarSurface/)
       expect(css).toContain(`grid-template-rows: ${ADVANCED_WINDOWS_TITLEBAR_HEIGHT}px minmax(0, 1fr)`)
       expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-mode="advanced"\]\[data-desktop-platform="win32"\] \.dshDesktopSidebarSurface \{ grid-row: 1 \/ -1; \}/)
-      expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-mode="advanced"\]\[data-desktop-platform="win32"\] \.dshDesktopConversationSurface,\s*\.dshDesktopFrame\[data-desktop-mode="advanced"\]\[data-desktop-platform="win32"\] \.dshDesktopDetailsSurface \{ grid-row: 2; \}/)
-      expect(css).toMatch(/\.dshDesktopWindowsCaptionRow \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 1;/)
-      expect(css).toMatch(new RegExp(`\\.dshDesktopWindowsCaptionRow::before \\{[^}]*inset: 0 ${WINDOWS_CAPTION_CONTROLS_WIDTH}px 0 0;[^}]*-webkit-app-region: drag;`))
-      expect(css).toContain('html:has([aria-modal="true"]) .dshDesktopWindowsCaptionRow::before { -webkit-app-region: no-drag !important; }')
-      expect(css).not.toMatch(/data-desktop-platform="win32"[^{}]*header[^{}]*\{[^}]*padding-right/)
+      expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-mode="advanced"\]\[data-desktop-platform="win32"\] \.dshDesktopConversationSurface \{ grid-row: 1 \/ -1; \}/)
+      expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-mode="advanced"\]\[data-desktop-platform="win32"\] \.dshDesktopDetailsSurface \{ grid-row: 2; \}/)
+      expect(css).toMatch(/\.dshDesktopWindowsCaptionRow \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 1;[^}]*background: transparent;[^}]*pointer-events: none;/)
+      expect(css).toContain('.dshDesktopWindowsCaptionRow::before { display: none; }')
+      // The Windows conversation title occupies the 32px caption band; native
+      // controls get their measured safe width and better-sidebar starts below.
+      expect(css).toContain('padding-top: 20px;')
+      expect(css).toContain('padding-right: 78px;')
+      expect(css).toContain(`padding-right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 12}px;`)
+      expect(css).toContain('header > :first-child { -webkit-app-region: drag; }')
+      expect(css).toMatch(/data-dsh-desktop-mode="advanced"\]\[data-dsh-desktop-platform="win32"\] \[class\*="toggleCluster"\] \{[^}]*right: calc\(var\(--dsh-sidebar-width, 0px\) \+ 10px\);[^}]*transition: right/)
+      expect(css).toContain('[data-dsh-sidebar-dragging] [class*="toggleCluster"] { transition: none; }')
+      expect(css).toContain('body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="darwin"] [data-slot="conversation"] header { padding-top: 4px; padding-right: 98px; }')
+      expect(css).toContain('body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="darwin"] [class*="toggleCluster"] { top: 26px; }')
       expect(appendChild).toHaveBeenCalledWith(style)
       dispose()
       expect(remove).toHaveBeenCalledOnce()
@@ -405,7 +415,18 @@ describe('independent Desktop frame', () => {
       const dispose = installExtendedStyles()
       expect(css).toContain(`top: ${DESKTOP_FRAME_HEIGHT}px`)
       expect(DESKTOP_FRAME_HEIGHT).toBe(36)
+      expect(DESKTOP_FRAME_HEIGHT_WIN32).toBe(28)
       expect(css).toMatch(/#root \{[^}]*position: fixed;[^}]*right: 0;[^}]*bottom: 0;[^}]*left: 0;[^}]*padding-top: 0;[^}]*transform: translateZ\(0\);/)
+      expect(css).toMatch(/\[data-dsh-desktop-platform="win32"\] #root \{[^}]*top: 0;/)
+      expect(css).toMatch(/body:is\(\[data-dsh-desktop-mode="compatibility"\], \[data-dsh-desktop-mode="extended"\]\)\[data-dsh-desktop-platform="win32"\][\s\S]*:has\(> \[data-shell-overlay\]\)[\s\S]*> div:not\(\[data-shell-overlay\]\):not\(\[data-side\]\) \{[^}]*padding-top: 0;/)
+      // The [data-slot="root"] display:contents anchor sits between the
+      // viewport and the upstream frame; a child combinator before :has
+      // matches nothing and the columns slide under the caption buttons.
+      expect(css).toContain('[data-dsh-desktop-content-viewport] :has(> [data-shell-overlay])')
+      expect(css).not.toContain('[data-dsh-desktop-content-viewport] > :has(> [data-shell-overlay])')
+      expect(css).toMatch(/body\[data-dsh-desktop-mode="extended"\]\[data-dsh-desktop-platform="win32"\][\s\S]*\.dshDesktopSidebarSurface[^}]*padding-top: 0;/)
+      expect(css).toMatch(/body\[data-dsh-desktop-mode="extended"\]\[data-dsh-desktop-platform="win32"\][\s\S]*\.dshDesktopDetailsSurface[^}]*padding-top: var\(--dsh-desktop-frame-height\);/)
+      expect(css).toMatch(/\[data-dsh-desktop-platform="win32"\][\s\S]*\[data-shell-overlay\] \{[^}]*top: var\(--dsh-desktop-frame-height\);/)
       expect(css).toMatch(/\[data-shell-overlay\] \{[^}]*overflow: hidden;[^}]*transform: translateZ\(0\);/)
       expect(css).toMatch(/\[data-slot="sidebar\.footer\.action"\] \{[^}]*display: flex !important;[^}]*flex-direction: column;[^}]*max-height: min\(40vh, 240px\);[^}]*overflow-y: auto;/)
       expect(css).toMatch(/\[data-slot="sidebar\.footer\.action"\] > \* \{[^}]*flex: none;[^}]*min-width: 0;/)
@@ -425,8 +446,28 @@ describe('independent Desktop frame', () => {
       expect(css).toMatch(/\.dshDesktopTitlebarIconButton \{[^}]*width: 26px;[^}]*height: 26px;[^}]*border-radius: 7px;/)
       expect(css).toMatch(/\.dshDesktopTitlebarIconButton svg,[^}]*width: 14px;[^}]*height: 14px;/)
       expect(css).toContain('.dshDesktopActionMenu')
-      expect(css).toContain(`padding: 0 ${WINDOWS_CAPTION_CONTROLS_WIDTH + 8}px 0 8px`)
+      expect(css).toContain('[data-platform="win32"] {\n  padding: 0 0 0 8px;')
+      expect(css).toMatch(/\.dshDesktopFrameTitlebar\[data-platform="win32"\] \{[^}]*background: transparent;[^}]*pointer-events: none;[^}]*-webkit-app-region: no-drag;/)
+      expect(css).not.toContain(`padding: 0 ${WINDOWS_CAPTION_CONTROLS_WIDTH + 8}px 0 8px`)
       expect(css).toContain(`padding: 0 8px 0 ${MACOS_TRAFFIC_LIGHT_SAFE_WIDTH + 8}px`)
+      expect(css).toMatch(/\.dshDesktopWindowControls \{[^}]*pointer-events: auto;[^}]*-webkit-app-region: no-drag;/)
+      expect(css).toMatch(/\.dshDesktopWindowControlsButton \{[^}]*width: 46px;[^}]*-webkit-app-region: no-drag;/)
+      expect(css).toMatch(/\.dshDesktopWindowControlsClose:hover,[^{]*\{[^}]*background: var\(--dsw-alias-state-error-primary\);/)
+      expect(css).toMatch(/body\[data-dsh-desktop-mode="compatibility"\] \{[^}]*--dsh-desktop-frame-fill: var\(--dsw-alias-bg-base\);/)
+      expect(css).toMatch(/body\[data-dsh-desktop-mode="extended"\]\[data-dsh-desktop-material="off"\] \{[^}]*--dsh-desktop-frame-fill: var\(--dsw-alias-bg-layer-1\);/)
+      expect(css).not.toContain('var(--dsw-alias-bg-base) 54%')
+      // The better-sidebar panel toggle cluster drops out of the caption band
+      // onto the session header's utility row, and the header yields its width.
+      expect(css).toMatch(/data-dsh-desktop-platform="win32"\] \[data-slot="conversation"\] header \{\s*padding-top: 20px;\s*padding-right: 78px;\s*\}/)
+      expect(css).toMatch(/data-dsh-sidebar-collapsed\] \[data-slot="conversation"\] header \{\s*padding-right: 150px;\s*\}/)
+      expect(css).toContain('[data-slot="conversation"] header > :first-child')
+      expect(css).toContain('-webkit-app-region: drag;')
+      expect(css).toMatch(/data-dsh-desktop-platform="win32"\] \[class\*="toggleCluster"\] \{[^}]*right: calc\(var\(--dsh-sidebar-width, 0px\) \+ 10px\);[^}]*transition: right/)
+      expect(css).toMatch(/data-dsh-desktop-platform="darwin"\] \[class\*="toggleCluster"\] \{\s*top: 42px;\s*\}/)
+      // The Windows caption band compresses to 28px and every consumer of the
+      // frame-height var follows; the titlebar element carries a literal height.
+      expect(css).toMatch(/\[data-dsh-desktop-platform="win32"\] \{\s*--dsh-desktop-frame-height: 28px;\s*\}/)
+      expect(css).toMatch(/\[data-dsh-desktop-platform="win32"\]\s*\.dshDesktopFrameTitlebar \{\s*height: 28px;\s*\}/)
       expect(appendChild).toHaveBeenCalledWith(style)
       dispose()
       expect(remove).toHaveBeenCalledOnce()

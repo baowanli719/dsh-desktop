@@ -174,6 +174,18 @@ try {
       })
       host.provide('webRuntime', {})
       host.provide('appExit', () => {})
+      // Signed-out gsclaw-server stub: the server skill provider must boot
+      // headlessly and list an empty catalog without a session.
+      host.provide('gsServer', {
+        userDataDir: join(home, 'userdata'),
+        endpoints: { resolve: () => 'http://127.0.0.1:18300/gsclaw' },
+        auth: {
+          accessToken: () => undefined,
+          async refreshAccessToken() { throw new Error('no session') },
+        },
+        config: { subscribe: () => () => {} },
+        clientConfig: () => undefined,
+      })
       host.provide('settings', {
         register() {
           return {

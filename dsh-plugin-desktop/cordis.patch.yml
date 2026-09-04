@@ -5,6 +5,7 @@
       name: dsh-plugin-desktop
       config:
         mode: compatibility
+        sessionLogButton: false
     - id: desktop-terminal
       name: dsh-plugin-desktop/terminal
       disabled: !!js process.platform === 'linux'
@@ -18,6 +19,70 @@
       name: dsh-plugin-desktop/profiles
     - id: desktop-updates
       name: dsh-plugin-desktop/updates
+    - id: server-skill-provider
+      name: dsh-plugin-desktop/server-skill-provider
+    # Global prompt section pinning agent replies to Simplified Chinese; it
+    # joins every agent assembly, including preset agents.
+    - id: desktop-prompt-language
+      name: dsh-plugin-desktop/prompt-language
+    # Default-enabled third-party sidebar workbench (files/terminal/Git/
+    # sub-agents). No config key: the plugin's own defaults apply.
+    - id: better-sidebar
+      name: 'dsh-better-sidebar'
+    # Office-suite preview viewers (.docx/.xlsx/.pptx) for the better-sidebar
+    # editor; the client-only plugin registers them through the sidebar's
+    # file-viewer service. The row id matches the plugin's own bundle patch so
+    # a manual `dsh plugin add` cannot double-mount it. AGPL-3.0: internal
+    # distribution only, see THIRD_PARTY_NOTICES.md.
+    - id: dsh-better-sidebar-plugin-office
+      name: '@huanlin/dsh-plugin-better-sidebar-plugin-office'
+
+# Local skill discovery is banned in the desktop product: skills arrive from
+# gsclaw-server alone (server-skill-provider above). This row is the first
+# gate; prepareDesktopProfile additionally strips any mention of the
+# skill-filesystem identity from every non-desktop patch layer and sanitizes
+# the preset root so no layer can re-enable local discovery. tool-skill (the
+# model-facing catalog over the ctx.skills registry) stays enabled: presets
+# mount it per agent to consume the server provider's catalog, and
+# assertEffectiveSkillRows pins it to its canonical package identity.
+- id: skill-filesystem
+  disabled: true
+
+# The desktop product fills the generic brand slots with its own client-side
+# occupant (dsh-plugin-desktop/client, src/client/desktop-brand.tsx); the
+# upstream official brand occupant stays disabled here.
+- id: ui-brand-official
+  disabled: true
+
+# Keep the three office-assistant composer capabilities mounted explicitly.
+# The Desktop client contributes their plus-menu launch rows while these
+# canonical Web faces retain attachment rendering, the skill reference
+# surface, and goal state/edit presentation.
+- id: ui-attachment
+  name: '@deepseek-ai/dsh-client-ui-attachment'
+  disabled: false
+
+- id: ui-skill
+  name: '@deepseek-ai/dsh-client-ui-skill'
+  disabled: false
+
+- id: ui-goal
+  name: '@deepseek-ai/dsh-client-ui-goal'
+  disabled: false
+
+# Server-mediated model access: Agent-loop LLM calls cross the loopback
+# gsclaw-server proxy (src/server/gs-llm-proxy.ts), whose provider profiles
+# arrive through the mirrored `llm-pi-ai:` settings section. The direct
+# DeepSeek adapter would bypass the proxy, and the Models settings page would
+# hold provider keys on the client. These rows are the first gate;
+# prepareDesktopProfile additionally strips any mention of the model-row
+# identities from user and home patch layers and asserts the pinned
+# `llm-pi-ai` / `agent-default-model` rows keep their canonical packages.
+- id: llm-deepseek
+  disabled: true
+
+- id: ui-settings-models
+  disabled: true
 
 # A desktop launch has no terminal operator waiting for the Web readiness line.
 - id: web-runtime

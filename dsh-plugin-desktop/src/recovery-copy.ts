@@ -1,5 +1,6 @@
 /** Shared recovery copy used by the native page and its main-process actions. */
 
+import { currentBrand, interpolateBrand } from './brand.ts'
 import type { DesktopLocale } from './runtime.ts'
 import type { DesktopStartupRecoveryOperationStage } from './startup-recovery-controller.ts'
 
@@ -93,8 +94,8 @@ export interface DesktopRecoveryCopy {
 
 const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
   en: {
-    title: 'DSH Desktop Recovery Assistant',
-    fallbackBody: 'The recovery information could not be read. Quit and start DSH Desktop again.',
+    title: '{brand} Recovery Assistant',
+    fallbackBody: 'The recovery information could not be read. Quit and start {brand} again.',
     reason: 'Why Recovery Mode opened',
     requestedMode: 'Opened from the restart menu',
     requestedBody: 'Normal startup is paused before the current Profile and plugin Host load.',
@@ -131,7 +132,7 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     showDiagnostics: 'Show in folder',
     privacy: 'The archive may contain local paths, logs, system information, and crash-memory fragments. Review it before sharing.',
     configurationFiles: 'Configuration files',
-    configurationFilesBody: 'View or edit the current Profile and shared Harness-home configuration. Restart DSH Desktop after making changes.',
+    configurationFilesBody: 'View or edit the current Profile and shared Harness-home configuration. Restart {brand} after making changes.',
     openSettingsDocument: 'Open settings.yaml',
     openProfilePatch: 'Edit Profile patch',
     openProfileManifest: 'Edit plugin manifest',
@@ -148,23 +149,23 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     noHealthyStartup: 'No healthy startup has been recorded in this slot.',
     openCheckpoint: 'Browse files',
     rollbackCheckpoint: 'Roll back to this slot',
-    desktopVersion: 'DSH Desktop version',
+    desktopVersion: '{brand} version',
     pluginCount: 'Plugins',
     configurationFileCount: 'Configuration files',
     checkpointSize: 'Checkpoint size',
     unknown: 'Unknown',
-    restart: 'Restart DSH Desktop',
+    restart: 'Restart {brand}',
     quit: 'Quit',
     working: 'Applying the recovery action…',
     cancel: 'Cancel',
     confirmUninstall: 'Uninstall this plugin?',
     confirmUninstallBody: 'DSH will remove this dependency from the current Profile and reconcile its plugin layers. This does not depend on which market installed it.',
     confirmRollback: 'Roll back this configuration?',
-    confirmRollbackBody: capturedAt => `This immediately restores the current Profile plus the checkpointed settings.yaml and Harness-home patch captured at ${capturedAt}. After restarting, DSH Desktop will use the rolled-back configuration.`,
+    confirmRollbackBody: capturedAt => `This immediately restores the current Profile plus the checkpointed settings.yaml and Harness-home patch captured at ${capturedAt}. After restarting, {brand} will use the rolled-back configuration.`,
     confirmRollbackAction: 'Roll Back',
-    uninstalledSuccess: 'The plugin was removed from the current Profile. Restart DSH Desktop to use the updated plugin configuration.',
-    rollbackSuccess: slotId => `Rolled back to ${slotId}. Restart DSH Desktop to use this configuration; the first healthy start after rollback will preserve all three existing slots.`,
-    profileSelectedSuccess: 'This Profile is now selected. Restart DSH Desktop to use it.',
+    uninstalledSuccess: 'The plugin was removed from the current Profile. Restart {brand} to use the updated plugin configuration.',
+    rollbackSuccess: slotId => `Rolled back to ${slotId}. Restart {brand} to use this configuration; the first healthy start after rollback will preserve all three existing slots.`,
+    profileSelectedSuccess: 'This Profile is now selected. Restart {brand} to use it.',
     actionFailed: 'The recovery action could not be completed. Review the diagnostic archive and try again.',
     rollbackFailedTitle: 'Rollback failed',
     rollbackFailedMessage: 'The rollback did not finish. The Recovery Assistant remains open so you can review the details and try again.',
@@ -181,8 +182,8 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     close: 'Close',
   },
   zh: {
-    title: 'DSH Desktop 恢复助手',
-    fallbackBody: '无法读取恢复信息。请退出并重新启动 DSH Desktop。',
+    title: '{brand} 恢复助手',
+    fallbackBody: '无法读取恢复信息。请退出并重新启动{brand}。',
     reason: '进入恢复模式的原因',
     requestedMode: '从重启菜单主动进入',
     requestedBody: '普通启动已暂停，当前 Profile 和插件 Host 尚未加载。',
@@ -219,7 +220,7 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     showDiagnostics: '在文件夹中显示',
     privacy: '诊断包可能包含本地路径、日志、系统信息和崩溃内存片段，分享前请先检查。',
     configurationFiles: '配置文件',
-    configurationFilesBody: '查看或编辑当前 Profile 与 DSH home 的共享配置。修改后需要重新启动 DSH Desktop。',
+    configurationFilesBody: '查看或编辑当前 Profile 与 DSH home 的共享配置。修改后需要重新启动{brand}。',
     openSettingsDocument: '打开 settings.yaml',
     openProfilePatch: '编辑 Profile 补丁',
     openProfileManifest: '编辑插件清单',
@@ -236,23 +237,23 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     noHealthyStartup: '此槽位尚未记录健康启动。',
     openCheckpoint: '浏览文件',
     rollbackCheckpoint: '回滚到此槽位',
-    desktopVersion: 'DSH Desktop 版本',
+    desktopVersion: '{brand} 版本',
     pluginCount: '插件',
     configurationFileCount: '配置文件',
     checkpointSize: 'Checkpoint 大小',
     unknown: '未知',
-    restart: '重启 DSH Desktop',
+    restart: '重启{brand}',
     quit: '退出',
     working: '正在执行恢复操作…',
     cancel: '取消',
     confirmUninstall: '卸载这个插件？',
     confirmUninstallBody: 'DSH 将从当前 Profile 中移除此依赖，并重新整理插件层。无论插件由哪个市场安装，都会使用相同的卸载流程。',
     confirmRollback: '回滚这套配置？',
-    confirmRollbackBody: capturedAt => `将立即恢复 ${capturedAt} 创建的 Checkpoint 中的当前 Profile、settings.yaml 与 DSH home 补丁；重启后，DSH Desktop 将使用回滚后的配置。`,
+    confirmRollbackBody: capturedAt => `将立即恢复 ${capturedAt} 创建的 Checkpoint 中的当前 Profile、settings.yaml 与 DSH home 补丁；重启后，{brand} 将使用回滚后的配置。`,
     confirmRollbackAction: '回滚',
-    uninstalledSuccess: '插件已从当前 Profile 中卸载。请重启 DSH Desktop 以使用更新后的插件配置。',
-    rollbackSuccess: slotId => `已回滚到${slotId}。请重启 DSH Desktop 以使用该配置；回滚后的第一次健康启动会保留现有三个槽位。`,
-    profileSelectedSuccess: '已设为当前 Profile。请重启 DSH Desktop 以使用该 Profile。',
+    uninstalledSuccess: '插件已从当前 Profile 中卸载。请重启{brand} 以使用更新后的插件配置。',
+    rollbackSuccess: slotId => `已回滚到${slotId}。请重启{brand} 以使用该配置；回滚后的第一次健康启动会保留现有三个槽位。`,
+    profileSelectedSuccess: '已设为当前 Profile。请重启{brand} 以使用该 Profile。',
     actionFailed: '无法完成恢复操作。请检查诊断包后重试。',
     rollbackFailedTitle: '回滚失败',
     rollbackFailedMessage: '回滚未能完成。恢复助手会保持打开，你可以查看详细错误后重试。',
@@ -270,6 +271,7 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
   },
 }
 
-export function desktopRecoveryCopy(locale: DesktopLocale): DesktopRecoveryCopy {
-  return COPY[locale]
+/** Resolve the recovery copy for one locale against the effective brand. */
+export function desktopRecoveryCopy(locale: DesktopLocale, brand = currentBrand().name): DesktopRecoveryCopy {
+  return interpolateBrand(COPY[locale], brand)
 }

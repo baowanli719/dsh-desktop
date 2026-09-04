@@ -2,6 +2,7 @@
 
 import { open } from 'node:fs/promises'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { currentBrand, interpolateBrand } from './brand.ts'
 import type {
   DesktopLocale,
   DesktopNotification,
@@ -300,9 +301,9 @@ function parseState(text: string): ParsedUpdateState {
 }
 
 function updateAvailableNotification(locale: DesktopLocale, version: string): DesktopNotification {
-  return locale === 'zh'
-    ? { title: 'DSH Desktop 有可用更新', body: `版本 ${version} 已可下载。打开 DSH Desktop 即可继续。` }
-    : { title: 'DSH Desktop Update Available', body: `Version ${version} is ready to download. Open DSH Desktop to continue.` }
+  return interpolateBrand(locale === 'zh'
+    ? { title: '{brand} 有可用更新', body: `版本 ${version} 已可下载。打开 {brand} 即可继续。` }
+    : { title: '{brand} Update Available', body: `Version ${version} is ready to download. Open {brand} to continue.` }, currentBrand().name)
 }
 
 async function readState(filename: string): Promise<string> {
