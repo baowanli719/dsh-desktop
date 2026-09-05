@@ -121,6 +121,29 @@ The ClientConfig `brand` field (`{ name?, headline? } | null`, single-language, 
 
 The renderer never holds the ClientConfig directly: the Host exposes the same-origin route `GET /api/gs-server/brand` (`GsBrandView`) with a strict parser in `src/client/gs-brand-api.ts`; the sidebar brand name (`desktop-brand.tsx`) and the settings/skills pages' wrapped `t()` fetch it on mount and fall back to the locale dictionary on failure. The upstream hero has no text slot, so `patches/dsh-client-ui-conversation@0.1.2-rc.1.patch` makes `EmptyHero` read `globalThis.__GS_BRAND_HEADLINE__` first (written by the desktop client entry before conversation mounts) and otherwise fall back to the upstream locale dictionary. Permission preset names use the same injection mechanism: `src/client/permission-labels.ts` writes the Chinese label map (keyed by preset value) to `globalThis.__GS_PERMISSION_LABELS__` before conversation mounts, and `patches/dsh-client-ui-conversation@0.1.2-rc.1.patch` plus `patches/dsh-client-ui-permission-presets@0.1.2-rc.1.patch` make the composer permission chip, the `/permission` popup, and the settings default-permission row read that map first, falling back to the upstream English transforms for unmapped values. Brand changes do not hot-update open window titles; every renderer surface picks them up on its next mount or launch.
 
+## Client patches and packaging conventions
+
+### Upstream client patch inventory
+
+Desktop UI customization lands on upstream client packages through the `patch:` protocol in the root `package.json` resolutions: each patch is wired on both the `npm:0.1.2-rc.1` and `npm:^0.1.2-rc.1` descriptors, and patch files are named `patches/<package>@<version>.patch`. The six currently in effect:
+
+- `dsh-session-log-export@0.1.2-rc.1.patch`: adds the `data-dsh-session-log-download="action"` anchor to the session header's Session-log download button; the CSS in `src/client/session-log-button.ts` toggles visibility from the `sessionLogButton` setting (hidden by default).
+- `dsh-client-ui-conversation@0.1.2-rc.1.patch`: the welcome hero headline prefers `__GS_BRAND_HEADLINE__`; the permission dropdown reads `__GS_PERMISSION_LABELS__` / `__GS_PERMISSION_DESCRIPTIONS__`; Chinese copy ("全自动") and warning styling for the automatic permission mode.
+- `dsh-client-ui-permission-presets@0.1.2-rc.1.patch`: the `/permission` popup and the settings default-permission row read `__GS_PERMISSION_LABELS__` first too.
+- `dsh-client-ui-commands@0.1.2-rc.1.patch`: the `/` root menu collapses commands into a "指令" drill row (an empty query returns only that row), with a breadcrumb back.
+- `dsh-client-ui-skill@0.1.2-rc.1.patch`: the `/` root menu no longer lists skills flatly on an empty query, deferring to the desktop "技能" drill row.
+- `dsh-client-ui-input-trigger@0.1.2-rc.1.patch`: candidate icons gain the `skill`/`goal`/`command` kinds (`renderDesktopCandidateIcon`); sources may declare `launchers` so an accompanying source joins a programmatic launch (the plus button's `toggleSource("command")`) — the desktop source (`src/client/composer-actions.ts`) appears in the plus menu only because it declares `launchers: ['command']`, and its `icon: 'skill' | 'goal'` candidates render through the same patch.
+
+**Every upstream version bump must port each patch and rewire the resolutions.** The 2026-09-04 alpha.1→rc.1 merge replaced the resolutions with plain `file:` lines wholesale, silently disabling all six patches (the session-log button resurfaced, the plus menu lost the desktop entries) while the orphaned patch files produced no error. When porting, verify with `git apply --check -p1` against the installed package, then run the patch-content assertions such as `dsh-plugin-desktop/tests/client-permission-labels.spec.ts`. Beware that local `core.autocrlf=true` makes `git apply` write CRLF output; regenerate patches with `diff --strip-trailing-cr`.
+
+### Client bundle module-table discipline
+
+The renderer `require` resolves only two kinds of words: platform seeds (react, react-dom, cordis, `dsh-client-store`, `dsh-client-ui-slots`, `dsh-client-ui-primitives`, and friends) and dynamic package rows declaring `dsh.client`; `dsh.client.inject` is an informational edge and adds nothing to the module table. `@deepseek-ai/dsh-file-reference` has no client row, so the desktop client bundle must inline it (the `noExternal` hook in `dsh-plugin-desktop/tsdown.config.ts`, matching the upstream preset's INLINE_SAFE classification); externalizing it into a runtime `require` fails the whole desktop client entry at activation, surfacing as "Unknown client plugin". The "keeps every client bundle require on a module-table word" test in `tests/package.spec.ts` scans the built artifact and pins this discipline.
+
+### Windows installer conventions
+
+NSIS ships the assisted installer (`oneClick: false`, `perMachine: false`, `allowElevation: true`, `allowToChangeInstallationDirectory: true`): setup must let the user confirm the install directory. No license file is configured under `build/`, so no EULA page appears; the in-app first-run setup wizard is disabled by `DESKTOP_SETUP_WIZARD_ENABLED = false` (`src/product-identity.ts`). Artifacts are `gs-worker-<version>-x64-Setup.exe` (installer) and `gs-worker-<version>-x64-Portable.exe` (portable). `oneClick: true` installs silently without path confirmation — never enable it for stable; the nsis assertion in `tests/package.spec.ts` pins the whole option set.
+
 ## Compatibility notes
 
 - **Compatibility mode is unaffected**: the `dsh-desktop.mode` compatibility/extended/enhanced presentation compositions are orthogonal to this rework; however, the login gate runs before Host boot, so no mode enters the shell without a valid session.
