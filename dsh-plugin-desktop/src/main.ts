@@ -200,6 +200,7 @@ import {
   DESKTOP_PACKAGE_NAME,
   DESKTOP_PRODUCT_NAME,
   DESKTOP_RELEASE_CHANNEL,
+  DESKTOP_SETUP_WIZARD_ENABLED,
 } from './product-identity.ts'
 import { desktopRecoveryCopy } from './recovery-copy.ts'
 
@@ -1102,7 +1103,11 @@ async function start(): Promise<void> {
     const setupWizardState = safeModePaths === undefined
       ? readDesktopSetupWizardState(marketUserDataDir, prepared.profile.dir)
       : undefined
-    if (safeModePaths === undefined && desktopSetupWizardRequired(setupWizardState, setupWizardVersions)) {
+    if (
+      DESKTOP_SETUP_WIZARD_ENABLED
+      && safeModePaths === undefined
+      && desktopSetupWizardRequired(setupWizardState, setupWizardVersions)
+    ) {
       const setupSettings = readDesktopSetupWizardSettings(prepared.settingsDocument)
       setupWizardWindow = new DesktopSetupWizardWindow({
         locale: desktopLocaleFromLanguageTag(app.getLocale()),

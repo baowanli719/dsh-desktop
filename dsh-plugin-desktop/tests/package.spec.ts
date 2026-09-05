@@ -60,6 +60,7 @@ const workspaceManifest = JSON.parse(readFileSync(new URL('package.json', worksp
   scripts?: Record<string, unknown>
 }
 const ciWorkflow = readFileSync(new URL('.github/workflows/ci.yml', workspaceRoot), 'utf8')
+const productIdentity = readFileSync(new URL('src/product-identity.ts', packageRoot), 'utf8')
 const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
 const runtimeVersion = '0.1.2-rc.1'
 const dshResolution = (name: string): unknown =>
@@ -102,7 +103,9 @@ describe('published package surface', () => {
     expect(main).toContain('notifyDesktopSafeModeActive(runtime, electronLogger)')
     expect(main).toContain('safeModePaths !== undefined && DESKTOP_SAFE_MODE_DEFAULTS.settings.notifications.enabled')
     expect(main).toContain('const setupWizardState = safeModePaths === undefined')
-    expect(main).toContain('if (safeModePaths === undefined && desktopSetupWizardRequired(')
+    expect(main).toContain('DESKTOP_SETUP_WIZARD_ENABLED')
+    expect(main).toContain('&& safeModePaths === undefined')
+    expect(productIdentity).toContain('DESKTOP_SETUP_WIZARD_ENABLED = false')
     expect(main).toContain('const safeModeDefaults = DESKTOP_SAFE_MODE_DEFAULTS')
     expect(main).toContain('updateDesktopSetupWizardSettings(prepared.settingsDocument, safeModeDefaults.settings)')
     expect(main).toContain('selectDesktopMarketProvider(marketUserDataDir, safeModeDefaults.market)')
@@ -159,6 +162,7 @@ describe('published package surface', () => {
         '@deepseek-ai/dsh-api-remotes',
         '@deepseek-ai/dsh-client-connection',
         '@deepseek-ai/dsh-client-locale',
+        '@deepseek-ai/dsh-file-reference',
         '@deepseek-ai/dsh-client-ui-conversation',
         '@deepseek-ai/dsh-client-ui-input-trigger',
         '@deepseek-ai/dsh-client-ui-renderer',
@@ -417,6 +421,32 @@ describe('published package surface', () => {
 
     expect(config).toContain("'process.env.NODE_ENV': JSON.stringify('production')")
     expect(client).not.toMatch(/\bprocess(?:\.|\[)/u)
+  })
+
+  it('keeps every client bundle require on a module-table word', () => {
+    // The renderer require resolves only platform seed specifiers and dynamic
+    // package rows; anything else throws inside the factory and the desktop
+    // client entry never activates. dsh-file-reference has no dsh.client row,
+    // so the bundle must inline it instead of requiring it.
+    const client = readFileSync(new URL('lib/client.js', packageRoot), 'utf8')
+    const requests = [...client.matchAll(/\brequire\("([^"]+)"\)/g)].map(match => match[1]!)
+    const moduleTableWords = new Set([
+      'react',
+      'react/jsx-runtime',
+      'react-dom',
+      'react-dom/client',
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-client-store',
+      '@deepseek-ai/dsh-client-ui-slots',
+      '@deepseek-ai/dsh-client-ui-primitives',
+      '@deepseek-ai/dsh-client-ui-renderer',
+    ])
+
+    expect(requests.length).toBeGreaterThan(0)
+    for (const request of new Set(requests)) {
+      expect(moduleTableWords.has(request), `client bundle requires "${request}", which the renderer module table cannot resolve`).toBe(true)
+    }
+    expect(client).not.toContain('require("@deepseek-ai/dsh-file-reference/grammar")')
   })
 
   it('installs Host command PATHs after the launch snapshot and before profile boot', () => {
@@ -747,11 +777,12 @@ describe('published package surface', () => {
 
   it('fixes the installed application identity', () => {
     expect(workspaceManifest.version).toBeUndefined()
-    expect(manifest.version).toBe('2.0.5')
+    expect(manifest.version).toBe('2.0.6')
     expect(manifest.build?.productName).toBe('gs-worker')
     expect(manifest.build?.appId).toBe('com.enterprise.officeagent')
     expect(manifest.build?.asarUnpack).toEqual([
       'package.json',
+      'THIRD_PARTY_NOTICES.md',
       'cordis.patch.yml',
       'build/**',
       'lib/**',
@@ -774,6 +805,7 @@ describe('published package surface', () => {
       'cordis.patch.yml',
       'lib/**',
       'package.json',
+      'THIRD_PARTY_NOTICES.md',
       '!node_modules/node-pty/build/**',
       // The unlicensed Univer Pro packages ride along as @univerjs/presets
       // dependencies but stay out of the installer (verify-licenses.mjs
@@ -791,11 +823,8 @@ describe('published package surface', () => {
     expect(manifest.build?.win?.artifactName).toBe('gs-worker-${version}-${arch}-Portable.${ext}')
     expect(manifest.build?.nsis).toEqual({
       include: 'installer.nsh',
-      license: 'THIRD_PARTY_NOTICES.md',
-      oneClick: false,
+      oneClick: true,
       perMachine: false,
-      allowElevation: true,
-      allowToChangeInstallationDirectory: true,
       createDesktopShortcut: true,
       createStartMenuShortcut: true,
       differentialPackage: false,

@@ -1,8 +1,7 @@
 diff --git a/lib/client.js b/lib/client.js
 --- a/lib/client.js
 +++ b/lib/client.js
-@@ -191,7 +191,8 @@ window.__ModuleLoader__.load({
- 			const busy = useSessionLogDownload((state) => state.bySession[String(sessionId)])?.status === "downloading";
+@@ -192,6 +192,7 @@
  			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("button", {
  				type: "button",
  				className: HeaderAction_module_css_default.sessionLogButton,

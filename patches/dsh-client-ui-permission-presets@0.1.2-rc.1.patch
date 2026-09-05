@@ -1,0 +1,12 @@
+diff --git a/lib/client.js b/lib/client.js
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -93,6 +93,8 @@
+ 		* @returns the built-in product label or the conventional display name.
+ 		*/
+ 		function displayPermissionPreset(value, name, t) {
++			const injected = globalThis.__GS_PERMISSION_LABELS__?.[value];
++			if (typeof injected === "string" && injected !== "") return injected;
+ 			const key = PRESET_LABEL_KEYS.get(value);
+ 			if (key !== void 0 && (name === value || name === DEFAULT_PRESET_LABELS[key])) return t?.(key) ?? DEFAULT_PRESET_LABELS[key];
+ 			return displayPresetName(name);

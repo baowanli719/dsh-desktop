@@ -47,13 +47,14 @@ describe('desktop composer plus actions', () => {
     expect(source).toMatchObject({
       name: DESKTOP_COMPOSER_ACTION_SOURCE,
       order: -100,
+      launchers: ['command'],
       showGroupTitle: false,
     })
     const rows = await source.candidates(session, request())
     expect(rows.map(row => row.name)).toEqual(['添加文件和图片', '技能', '目标'])
     expect(rows[0]).toMatchObject({ description: 'Ctrl+U', icon: 'file' })
-    expect(rows[1]?.icon).toBeUndefined()
-    expect(rows[2]?.icon).toBeUndefined()
+    expect(rows[1]).toMatchObject({ icon: 'skill' })
+    expect(rows[2]).toMatchObject({ icon: 'goal' })
     expect(source.onPick(pick(rows[0]!))).toBe('handled')
     expect(openFiles).toHaveBeenCalledWith(session.sessionId)
     expect(source.onPick(pick(rows[2]!))).toEqual({ text: '/goal ' })

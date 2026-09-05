@@ -34,22 +34,21 @@ describe('installDesktopPermissionLabels', () => {
   })
 })
 
-describe('alpha permission-label client patches', () => {
+describe('permission-label client patches', () => {
   const conversationPatch = readFileSync(new URL(
-    '../../patches/dsh-client-ui-conversation@0.1.2-alpha.1.patch',
+    '../../patches/dsh-client-ui-conversation@0.1.2-rc.1.patch',
     import.meta.url,
   ), 'utf8')
   const presetsPatch = readFileSync(new URL(
-    '../../patches/dsh-client-ui-permission-presets@0.1.2-alpha.1.patch',
+    '../../patches/dsh-client-ui-permission-presets@0.1.2-rc.1.patch',
     import.meta.url,
   ), 'utf8')
 
   it('renders the composer permission control with injected labels and descriptions', () => {
     for (const marker of [
-      'function optionLabel(option, t) {',
-      'const injected = globalThis.__GS_PERMISSION_LABELS__?.[option.value];',
+      'function permissionLabel(value, name, t) {',
+      'const injected = globalThis.__GS_PERMISSION_LABELS__?.[value];',
       'if (typeof injected === "string" && injected !== "") return injected;',
-      'return option.value === FULL_ACCESS ? t("access.fullLabel") : displayName(option.name);',
       'const injected = globalThis.__GS_PERMISSION_DESCRIPTIONS__?.[option.value];',
       'className: PermissionSelect_module_css_default.permissionMenu,',
       'currentValue === FULL_ACCESS && PermissionSelect_module_css_default.triggerAutomatic',
@@ -63,14 +62,14 @@ describe('alpha permission-label client patches', () => {
     expect(conversationPatch).toContain('"access.confirm.title": "确认启用全自动？"')
     expect(conversationPatch).toContain('"access.confirm.enable": "启用全自动"')
     expect(conversationPatch).toContain('启用全自动后，智能体将不再请求确认')
+    expect(conversationPatch).toContain('"access.preset.fullAccess": "全自动"')
   })
 
   it('teaches the /permission popup and settings row the same injection', () => {
     for (const marker of [
-      'function displayPermissionPreset(value, name) {',
+      'function displayPermissionPreset(value, name, t) {',
       'const injected = globalThis.__GS_PERMISSION_LABELS__?.[value];',
       'if (typeof injected === "string" && injected !== "") return injected;',
-      'return value === "danger-full-access" ? "Full access" : displayPresetName(name);',
     ]) {
       expect(presetsPatch).toContain(marker)
     }

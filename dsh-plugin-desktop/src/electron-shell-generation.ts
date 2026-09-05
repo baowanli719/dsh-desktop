@@ -378,6 +378,17 @@ export class ElectronShellGeneration {
         )
       }
     }
+    const consoleMessage = (
+      details: Electron.Event<Electron.WebContentsConsoleMessageEventParams>,
+    ): void => {
+      if (details.level !== 'warning' && details.level !== 'error') return
+      const source = details.sourceId.length === 0
+        ? ''
+        : ` (${details.sourceId}:${String(details.lineNumber)})`
+      this.options.logError(
+        `dsh-plugin-desktop: renderer console ${details.level}: ${details.message}${source}`,
+      )
+    }
 
     app.on('activate', activate)
     if (platform.platform === 'darwin') app.on('did-become-active', activate)
@@ -391,6 +402,7 @@ export class ElectronShellGeneration {
     window.webContents.on('will-redirect', redirect)
     window.webContents.on('render-process-gone', rendererGone)
     window.webContents.on('did-fail-load', loadFailed)
+    window.webContents.on('console-message', consoleMessage)
     window.webContents.setWindowOpenHandler(({ url }) => {
       try {
         const target = new URL(url)
@@ -422,6 +434,7 @@ export class ElectronShellGeneration {
       window.webContents.off('will-redirect', redirect)
       window.webContents.off('render-process-gone', rendererGone)
       window.webContents.off('did-fail-load', loadFailed)
+      window.webContents.off('console-message', consoleMessage)
       removeRendererAccessHeader?.()
       removeRendererAccessHeader = undefined
       tray?.off('click', show)
