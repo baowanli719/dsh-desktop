@@ -399,8 +399,10 @@
     },
     "nsis": {
       "include": "installer.nsh",
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "differentialPackage": false,

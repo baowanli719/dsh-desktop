@@ -823,8 +823,10 @@ describe('published package surface', () => {
     expect(manifest.build?.win?.artifactName).toBe('gs-worker-${version}-${arch}-Portable.${ext}')
     expect(manifest.build?.nsis).toEqual({
       include: 'installer.nsh',
-      oneClick: true,
+      oneClick: false,
       perMachine: false,
+      allowElevation: true,
+      allowToChangeInstallationDirectory: true,
       createDesktopShortcut: true,
       createStartMenuShortcut: true,
       differentialPackage: false,
