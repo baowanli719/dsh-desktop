@@ -55,6 +55,28 @@ export interface DownloadDesktopUpdateOptions {
   readonly signal?: AbortSignal
 }
 
+/**
+ * Inputs for one user-confirmed installer download from a server-pushed URL.
+ *
+ * Unlike the fixed-endpoint flow, the gsclaw-server download URLs are complete
+ * direct links: the request carries no `X-DSH-Desktop-*` headers and the
+ * response is not expected to echo them.
+ */
+export interface DownloadDesktopUpdateFromUrlOptions {
+  /** Direct http(s) installer URL delivered inside the server appUpdate push. */
+  readonly url: string
+  /** Host platform selecting installer validation. */
+  readonly platform: DesktopDownloadPlatform
+  /** Release version used to validate the selected installer. */
+  readonly version: string
+  /** Absolute installer path selected by the user. */
+  readonly destinationPath: string
+  /** Request implementation, normally backed by Electron `net.fetch`. */
+  readonly request: UpdateArtifactRequest
+  /** Optional cancellation signal owned by the update coordinator. */
+  readonly signal?: AbortSignal
+}
+
 /** Typed failure from installer request, validation, or cancellation. */
 export class UpdateDownloadError extends Error {
   /** Stable programmatic failure category. */
@@ -99,6 +121,8 @@ export interface DesktopUpdateArtifact {
   readonly platform: DesktopDownloadPlatform
   readonly version: string
   readonly path: string
+  /** Installer in the managed updates directory, deleted silently after the upgrade. */
+  readonly managed?: boolean
 }
 
 const UPDATE_ARTIFACT_STATE_VERSION = 1
@@ -148,18 +172,70 @@ export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOption
     throw new UpdateDownloadError('empty-body', 'The update download service returned an empty body.')
   }
   assertDeclaredSize(response)
+  return await completeDownload(paths, response.body, platform, options.signal)
+}
 
+/**
+ * Download one server-linked installer after its caller has obtained user confirmation.
+ * @param options - Direct URL, platform, release version, selected destination, request, and cancellation inputs.
+ * @returns Absolute path to the completely written and validated installer.
+ * @throws {UpdateDownloadError} For invalid inputs, transport failures, rejected responses, cancellation, and invalid installers.
+ */
+export async function downloadDesktopUpdateFromUrl(
+  options: DownloadDesktopUpdateFromUrlOptions,
+): Promise<string> {
+  const platform = validatedPlatform(options.platform)
+  validatedReleaseVersion(options.version)
+  const url = validatedDownloadUrl(options.url)
+  const destinationPath = validatedArtifactPath(options.destinationPath, platform)
+  const paths = await prepareDownloadPaths(destinationPath)
+  throwIfAborted(options.signal)
+
+  let response: Response
+  try {
+    response = await options.request(url, {
+      method: 'GET',
+      cache: 'no-store',
+      redirect: 'follow',
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    })
+  } catch (cause) {
+    if (options.signal?.aborted === true || isAbortFailure(cause)) throw aborted(cause)
+    throw new UpdateDownloadError('network', 'The update installer could not be downloaded.', { cause })
+  }
+
+  if (response.status !== 200) {
+    throw new UpdateDownloadError(
+      'http-status',
+      `The update download service returned HTTP ${String(response.status)}.`,
+      { status: response.status },
+    )
+  }
+  if (response.body === null) {
+    throw new UpdateDownloadError('empty-body', 'The update download service returned an empty body.')
+  }
+  assertDeclaredSize(response)
+  return await completeDownload(paths, response.body, platform, options.signal)
+}
+
+/** Write, validate, and atomically complete one accepted installer response. */
+async function completeDownload(
+  paths: DownloadPaths,
+  body: ReadableStream<Uint8Array>,
+  platform: DesktopDownloadPlatform,
+  signal: AbortSignal | undefined,
+): Promise<string> {
   let failure: unknown
   try {
-    await writeResponseBody(paths.temporary, response.body, options.signal)
-    throwIfAborted(options.signal)
+    await writeResponseBody(paths.temporary, body, signal)
+    throwIfAborted(signal)
     await validateArtifact(paths.temporary, platform)
-    throwIfAborted(options.signal)
+    throwIfAborted(signal)
     await unlinkIfPresent(paths.completed)
     await rename(paths.temporary, paths.completed)
     return paths.completed
   } catch (cause) {
-    failure = options.signal?.aborted === true || isAbortFailure(cause) ? aborted(cause) : cause
+    failure = signal?.aborted === true || isAbortFailure(cause) ? aborted(cause) : cause
     throw failure
   } finally {
     try {
@@ -258,6 +334,21 @@ function validatedPlatform(platform: DesktopDownloadPlatform): DesktopDownloadPl
   return platform
 }
 
+function validatedDownloadUrl(candidate: string): string {
+  let url: URL
+  try {
+    url = new URL(candidate)
+  } catch {
+    throw new UpdateDownloadError('invalid-options', 'The update download URL must be absolute.')
+  }
+  if ((url.protocol !== 'https:' && url.protocol !== 'http:')
+    || url.username !== ''
+    || url.password !== '') {
+    throw new UpdateDownloadError('invalid-options', 'The update download URL must be a credential-free http(s) URL.')
+  }
+  return candidate
+}
+
 function validatedVersion(version: string, channel: DesktopReleaseChannel = 'stable'): string {
   const parsed = parseSemVer(version)
   const expectedPrerelease = channel === 'stable'
@@ -335,7 +426,8 @@ function validatedArtifactPath(path: string, platform: DesktopDownloadPlatform):
   return resolve(path)
 }
 
-async function prepareArtifactStatePath(userDataPath: string): Promise<string> {
+/** Ensure the private managed-update directory below userData exists and return it. */
+export async function desktopUpdateManagedDirectory(userDataPath: string): Promise<string> {
   const root = validatedUserDataPath(userDataPath)
   const rootStat = await lstat(root)
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
@@ -343,6 +435,12 @@ async function prepareArtifactStatePath(userDataPath: string): Promise<string> {
   }
   const directory = join(root, 'updates')
   await preparePrivateDirectory(directory)
+  return directory
+}
+
+async function prepareArtifactStatePath(userDataPath: string): Promise<string> {
+  const root = validatedUserDataPath(userDataPath)
+  await desktopUpdateManagedDirectory(root)
   return artifactStatePath(root)
 }
 
@@ -357,13 +455,16 @@ async function validatedArtifactRecord(
   const platform = validatedPlatform(artifact.platform)
   const version = validatedReleaseVersion(artifact.version)
   const path = validatedArtifactPath(artifact.path, platform)
+  if (artifact.managed !== undefined && typeof artifact.managed !== 'boolean') {
+    throw new UpdateDownloadError('invalid-options', 'The update artifact cleanup state is invalid.')
+  }
   if (requireFile) {
     const stat = await lstat(path)
     if (!stat.isFile() || stat.isSymbolicLink()) {
       throw new UpdateDownloadError('invalid-options', 'The retained update installer must be a regular file.')
     }
   }
-  return { platform, version, path }
+  return { platform, version, path, ...(artifact.managed === undefined ? {} : { managed: artifact.managed }) }
 }
 
 async function parseArtifactRecord(text: string): Promise<DesktopUpdateArtifact> {
@@ -378,7 +479,9 @@ async function parseArtifactRecord(text: string): Promise<DesktopUpdateArtifact>
       && (value as { platform?: unknown }).platform !== 'win32')
     || typeof (value as { version?: unknown }).version !== 'string'
     || typeof (value as { path?: unknown }).path !== 'string'
-    || Object.keys(value).some(key => !['stateVersion', 'platform', 'version', 'path'].includes(key))) {
+    || ((value as { managed?: unknown }).managed !== undefined
+      && typeof (value as { managed?: unknown }).managed !== 'boolean')
+    || Object.keys(value).some(key => !['stateVersion', 'platform', 'version', 'path', 'managed'].includes(key))) {
     throw new UpdateDownloadError('invalid-options', 'The update artifact cleanup state is invalid.')
   }
   return await validatedArtifactRecord(value as DesktopUpdateArtifact, false)

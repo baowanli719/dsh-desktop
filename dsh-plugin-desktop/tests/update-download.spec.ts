@@ -7,7 +7,9 @@ import {
   MAX_UPDATE_DOWNLOAD_BYTES,
   UpdateDownloadError,
   desktopUpdateFilename,
+  desktopUpdateManagedDirectory,
   downloadDesktopUpdate,
+  downloadDesktopUpdateFromUrl,
   pendingDesktopUpdateArtifact,
   recordDesktopUpdateArtifact,
   resolveDesktopUpdateArtifact,
@@ -316,6 +318,43 @@ describe('desktop update artifact cleanup', () => {
     )
   })
 
+  it('rejects a non-boolean managed flag in the cleanup state', async () => {
+    const userDataPath = await temporaryDirectory()
+    const updates = join(userDataPath, 'updates')
+    await mkdir(updates)
+    await writeFile(join(updates, 'pending-installer.json'), JSON.stringify({
+      stateVersion: 1,
+      platform: 'win32',
+      version: '2.1.0',
+      path: join(userDataPath, 'installer.exe'),
+      managed: 'yes',
+    }))
+
+    await expectFailure(
+      pendingDesktopUpdateArtifact(userDataPath, '2.1.0', 'win32'),
+      'invalid-options',
+    )
+  })
+
+  it('round-trips a managed artifact record for silent cleanup', async () => {
+    const userDataPath = await temporaryDirectory()
+    const artifact = {
+      platform: 'win32' as const,
+      version: '2.1.0',
+      path: join(await desktopUpdateManagedDirectory(userDataPath), 'gs-worker-2.1.0-x64-Setup.exe'),
+      managed: true,
+    }
+    await writeFile(artifact.path, windowsArtifact())
+
+    await recordDesktopUpdateArtifact(userDataPath, artifact)
+
+    await expect(pendingDesktopUpdateArtifact(userDataPath, '2.1.0', 'win32')).resolves.toEqual(artifact)
+
+    await resolveDesktopUpdateArtifact(userDataPath, artifact, true)
+    await expect(pendingDesktopUpdateArtifact(userDataPath, '2.1.0', 'win32')).resolves.toBeUndefined()
+    await expect(access(artifact.path)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('offers a recorded artifact only after the installed version reaches the update', async () => {
     const userDataPath = await temporaryDirectory()
     const downloads = await temporaryDirectory()
@@ -352,5 +391,98 @@ describe('desktop update artifact cleanup', () => {
     await expect(pendingDesktopUpdateArtifact(userDataPath, '2.1.0', 'darwin')).resolves.toBeUndefined()
     if (remove) await expect(access(artifact.path)).rejects.toMatchObject({ code: 'ENOENT' })
     else await expect(access(artifact.path)).resolves.toBeUndefined()
+  })
+})
+
+describe('server-linked update installer download', () => {
+  const SERVER_URL = 'https://gsclaw.example.com/gsworker/downloads/gs-worker-2.1.0-x64-Setup.exe'
+
+  it('streams the given direct URL without fixed-endpoint headers or echo validation', async () => {
+    const directory = await temporaryDirectory()
+    const artifact = windowsArtifact()
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const request: UpdateArtifactRequest = async (url, init) => {
+      calls.push({ url, init })
+      return chunkedResponse([artifact.subarray(0, 200), artifact.subarray(200)])
+    }
+
+    const result = await downloadDesktopUpdateFromUrl({
+      url: SERVER_URL,
+      platform: 'win32',
+      version: '2.1.0',
+      destinationPath: join(directory, 'gs-worker-2.1.0-x64-Setup.exe'),
+      request,
+    })
+
+    expect(result).toBe(join(directory, 'gs-worker-2.1.0-x64-Setup.exe'))
+    expect(await readFile(result)).toEqual(Buffer.from(artifact))
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.url).toBe(SERVER_URL)
+    expect(calls[0]?.init).toMatchObject({ method: 'GET', cache: 'no-store', redirect: 'follow' })
+    expect(calls[0]?.init.headers).toBeUndefined()
+    await expectNoPartialFiles(directory)
+  })
+
+  it.each([
+    ['an ftp URL', 'ftp://gsclaw.example.com/gs-worker.exe'],
+    ['a credentialed URL', 'https://user:pass@gsclaw.example.com/gs-worker.exe'],
+    ['a relative URL', '/downloads/gs-worker.exe'],
+  ])('rejects %s before requesting', async (_label, url) => {
+    const directory = await temporaryDirectory()
+    let requested = false
+    await expectFailure(downloadDesktopUpdateFromUrl({
+      url,
+      platform: 'win32',
+      version: '2.1.0',
+      destinationPath: join(directory, 'gs-worker.exe'),
+      request: async () => {
+        requested = true
+        return chunkedResponse([windowsArtifact()])
+      },
+    }), 'invalid-options')
+    expect(requested).toBe(false)
+  })
+
+  it('rejects and removes a downloaded file that is not a PE executable', async () => {
+    const directory = await temporaryDirectory()
+    await expectFailure(downloadDesktopUpdateFromUrl({
+      url: SERVER_URL,
+      platform: 'win32',
+      version: '2.1.0',
+      destinationPath: join(directory, 'gs-worker.exe'),
+      request: async () => chunkedResponse([Buffer.alloc(1024)]),
+    }), 'invalid-artifact')
+    await expectNoPartialFiles(directory)
+    expect(await readdir(directory)).toEqual([])
+  })
+
+  it('rejects an unsuccessful response without leaving a partial file', async () => {
+    const directory = await temporaryDirectory()
+    await expectFailure(downloadDesktopUpdateFromUrl({
+      url: SERVER_URL,
+      platform: 'darwin',
+      version: '2.1.0',
+      destinationPath: join(directory, 'gs-worker.dmg'),
+      request: async () => new Response(null, { status: 404 }),
+    }), 'http-status')
+    await expectNoPartialFiles(directory)
+  })
+
+  it('downloads into the managed updates directory created below userData', async () => {
+    const userData = await temporaryDirectory()
+    const directory = await desktopUpdateManagedDirectory(userData)
+    expect(directory).toBe(join(userData, 'updates'))
+    const artifact = windowsArtifact()
+
+    const result = await downloadDesktopUpdateFromUrl({
+      url: SERVER_URL,
+      platform: 'win32',
+      version: '2.1.0',
+      destinationPath: join(directory, 'gs-worker-2.1.0-x64-Setup.exe'),
+      request: async () => chunkedResponse([artifact]),
+    })
+
+    expect(await readFile(result)).toEqual(Buffer.from(artifact))
+    await expectNoPartialFiles(directory)
   })
 })

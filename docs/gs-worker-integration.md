@@ -101,6 +101,18 @@ provider 同时维护一份同步快照(`gsSkillSync` tracker):记录最近一�
 2. **客户端日志上传**:`src/server/gs-log-exporter.ts` 是一个与本地 `FileExporter` 并存的 Cordis exporter,把渲染后经 `mask-secrets` 脱敏的消息缓冲成批,`POST /api/logs/client`(满 50 条或每 10 秒触发;每批 ≤ 200 条且 ≤ 192 KB,队列上限 2000 条,溢出丢最旧)。上传严格尽力而为:失败批次直接丢弃不重试,进程退出前给最后一次 flush 2 秒宽限;上传器自身的诊断只写本地文件日志,避免经 `ctx.logger` 递归。服务端写入 `client_logs` 表,管理侧经 `GET /api/admin/logs/client` 查看。
 3. **本地文件日志不变**:仍写 `userData/logs/dsh-YYYY-MM-DD.log`(及 `.error.log`),10 MiB 轮转、保留七天、总量 200 MiB 上限,`dsh-desktop.logLevel` 控制详细程度。
 
+## 应用更新下发
+
+ClientConfig 的 `appUpdate` 字段(`GsAppUpdateConfig`,`src/server/gs-contract.ts`)由服务端在登录、刷新与 `GET /api/client-config` 中下发,承载一条新版本通知:`version`(纯数字分段版本)、可选 `notes`(逐条更新说明)、`downloads`(按平台划分的安装包直链:`windowsX64` / `macArm` / `macIntel`)、可选 `availableFrom`(开放下载时间)与可选 `downloadWindow`(自动下载时段)。`null` 或缺失表示不下发更新提示。
+
+客户端消费链:`desktop-server-updates` 插件(`dsh-plugin-desktop/src/server-updates.ts`,在 `cordis.patch.yml` 中挂载,`inject = ['desktopRuntime', 'gsServer']`)订阅 `ctx.gsServer.config` 的推送快照,并每 5 分钟(`pullIntervalMs`)主动拉一次 `/api/client-config`——启动后 15 秒首拉(`initialPullDelayMs`),给 `restoreSession()` 的推送留出先到的时间;拉取失败(未登录/离线)完全静默。每次快照到达都经 `src/server-app-update.ts` 处理:`parseServerAppUpdate` 对线上 JSON 做防御性解析(版本必须是规范化纯数字 SemVer、直链必须是 http(s) 且无内嵌凭据、notes/availableFrom/downloadWindow 形状校验,任何字段非法整体视为无更新,宁可不提示不可崩溃),`evaluateServerAppUpdate` 再做评估:
+
+- `appUpdate` 为空、版本不高于当前、或当前平台/arch 无下载地址 → 不动作;
+- `now < availableFrom` → 只提示(notify-only),对话框没有下载按钮,仅说明何时开放下载;
+- 否则弹原生对话框(标题 + notes 逐条正文,主按钮为"升级"),用户点"升级"后全自动完成升级,点"稍后"本次运行内不再重复提示(内存去重,下次启动重新提示)。
+
+下载与安装纪律:安装包从 `downloads` 直链直接 GET——无需登录、不带 `X-DSH-*` 头、不校验回显头(gsclaw-server 静态目录不回显);写盘复用社区通道同一套防线:1 GiB 大小上限、PE/DMG 魔数校验、临时文件 + rename 原子完工(`downloadDesktopUpdateFromUrl`,`src/update-download.ts`)。确认"升级"后不再有任何交互:不弹保存对话框,安装包固定下载到 userData 下的 `updates/` 管理目录(0700 私有目录,`desktopUpdateManagedDirectory`;默认文件名取直链 basename,非法字符或扩展名不符时回退到生成的 `gs-worker-<version>-<platform>.<ext>`),下载开始时发一条系统通知。下载完成后:Windows 不弹"重启并安装"确认,直接以 NSIS `/S` 静默模式拉起安装器并退出应用(保留 `--updated --force-run`,装完自动启动新版);macOS 无法静默安装 DMG,自动打开 DMG 并弹说明对话框,由用户手工拖装。下载失败(网络/校验/取消)不弹窗,只记日志并发一条失败系统通知。服务端通道下载的 artifact 记录带 `managed: true` 标记(`recordDesktopUpdateArtifact`),升级后的下次启动由 `performUpdateArtifactCleanup` 静默删除残留安装包;社区通道用户自选路径下载的 artifact 不带该标记,仍按原行为弹"删除安装包?"询问。`downloadWindow` 不实现自动下载:本客户端的下载触发点就是"升级"按钮这一次确认,服务端契约明确手动下载不受时段限制,因此该字段只做形状校验、不参与评估。适配器未注入(`serverUpdates` 缺失)或当前构建不可下载(`canDownload === false`)时只写一条日志,不弹框;登出清空快照后不动作。
+
 ## 配置与运维
 
 端点解析优先级(`src/server/gs-endpoint.ts`,每次请求时读取,覆盖即时生效):
@@ -136,5 +148,6 @@ ClientConfig 的 `brand` 字段(`{ name?, headline? } | null`,单语言、不随
 - [模型 settings 镜像](../dsh-plugin-desktop/src/server/gs-llm-models.ts)
 - [服务端技能 provider](../dsh-plugin-desktop/src/server-skill-provider.ts)
 - [客户端日志上传](../dsh-plugin-desktop/src/server/gs-log-exporter.ts)
+- [服务端应用更新评估](../dsh-plugin-desktop/src/server-app-update.ts)
 - [profile 组成闸门与断言](../dsh-plugin-desktop/src/profile.ts)
 - [桌面架构](architecture.md)

@@ -29,6 +29,7 @@ export default defineConfig([
       'update-checker': 'src/update-checker.ts',
       'update-download': 'src/update-download.ts',
       updates: 'src/updates.ts',
+      'server-updates': 'src/server-updates.ts',
       'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts',
       'windows-acl-runner': 'src/windows-acl-runner.ts',
       main: 'src/main.ts',
@@ -82,7 +83,9 @@ export default defineConfig([
       '@deepseek-ai/dsh-client-ui-renderer',
       '@deepseek-ai/dsh-client-ui-primitives',
     ],
-    noExternal: (id: string) => id.startsWith('@deepseek-ai/') ? undefined : true,
+    noExternal: (id: string) => id.startsWith('@deepseek-ai/dsh-file-reference')
+      ? true
+      : id.startsWith('@deepseek-ai/') ? undefined : true,
     outputOptions: {
       entryFileNames: 'client.js',
       banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(PACKAGE_NAME)}, factory: (require) => {`,

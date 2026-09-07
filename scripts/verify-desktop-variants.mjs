@@ -67,6 +67,8 @@ const allowedDifferences = new Set([
   'tray-locale.ts',
   'update-download.ts',
   'update-lifecycle.ts',
+  'server-app-update.ts',
+  'server-updates.ts',
   'window-chrome.ts',
   'window-options.ts',
   'windows-volume-diagnostics.ts',

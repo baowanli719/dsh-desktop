@@ -47,10 +47,13 @@ import {
 } from './tray-locale.ts'
 import {
   desktopUpdateFilename,
+  desktopUpdateManagedDirectory,
   downloadDesktopUpdate,
+  downloadDesktopUpdateFromUrl,
   pendingDesktopUpdateArtifact,
   recordDesktopUpdateArtifact,
   resolveDesktopUpdateArtifact,
+  type DesktopDownloadPlatform,
   type DesktopUpdateArtifact,
 } from './update-download.ts'
 import type { UpdateCheckResult } from './update-checker.ts'
@@ -159,6 +162,11 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
       ...(installationId === undefined ? {} : { installationId }),
       request: (url, init) => net.fetch(url, init),
+      serverUpdates: {
+        promptUpdate: (version, notes, mode, availableFrom) =>
+          this.promptServerUpdate(version, notes, mode, availableFrom),
+        downloadAndOpen: (url, version, signal) => this.downloadAndOpenServerUpdate(url, version, signal),
+      },
       confirmDownload: (version, channel) => this.confirmUpdateDownload(version, channel),
       showManualCheckResult: result => this.showManualUpdateCheckResult(result),
       downloadAndOpen: (version, signal, channel) => this.downloadAndOpenUpdate(version, signal, channel),
@@ -693,7 +701,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     signal: AbortSignal,
     channel: DesktopReleaseChannel = 'stable',
   ): Promise<void> {
-    const copy = desktopNativeCopy(this.currentLocale)
     const platform = this.platformStrategy.updateDownloadPlatform
     if (platform === undefined) {
       throw new Error(`dsh-plugin-desktop: updates are unavailable on ${this.platform}`)
@@ -709,8 +716,72 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       request: (url, init) => net.fetch(url, init),
       signal,
     })
+    await this.openDownloadedUpdate(platform, version, artifactPath, signal)
+  }
+
+  /**
+   * Download a confirmed server-linked installer into the managed updates
+   * directory and hand it to the platform installation flow without further
+   * interaction. Windows installs silently; macOS can only open the DMG.
+   */
+  private async downloadAndOpenServerUpdate(
+    url: string,
+    version: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const copy = desktopNativeCopy(this.currentLocale)
+    const platform = this.platformStrategy.updateDownloadPlatform
+    if (platform === undefined) {
+      throw new Error(`dsh-plugin-desktop: updates are unavailable on ${this.platform}`)
+    }
+    const directory = await desktopUpdateManagedDirectory(app.getPath('userData'))
+    const destinationPath = join(directory, serverUpdateFilename(url, platform, version))
     signal.throwIfAborted()
-    const artifact: DesktopUpdateArtifact = { platform, version, path: artifactPath }
+    this.showNotification({
+      title: copy.updateAvailableTitle,
+      body: copy.serverUpdateDownloading(version),
+    })
+    let artifactPath: string
+    try {
+      artifactPath = await downloadDesktopUpdateFromUrl({
+        url,
+        platform,
+        version,
+        destinationPath,
+        request: (requestUrl, init) => net.fetch(requestUrl, init),
+        signal,
+      })
+    } catch (cause) {
+      if (!signal.aborted) {
+        this.showNotification({
+          title: copy.updateAvailableTitle,
+          body: copy.serverUpdateDownloadFailed(version),
+        })
+      }
+      throw cause
+    }
+    await this.openDownloadedUpdate(platform, version, artifactPath, signal, {
+      managed: true,
+      silent: platform === 'win32',
+    })
+  }
+
+  /** Record one validated installer and route it to the platform installation flow. */
+  private async openDownloadedUpdate(
+    platform: DesktopDownloadPlatform,
+    version: string,
+    artifactPath: string,
+    signal: AbortSignal,
+    options: { readonly managed?: boolean, readonly silent?: boolean } = {},
+  ): Promise<void> {
+    const copy = desktopNativeCopy(this.currentLocale)
+    signal.throwIfAborted()
+    const artifact: DesktopUpdateArtifact = {
+      platform,
+      version,
+      path: artifactPath,
+      ...(options.managed === true ? { managed: true } : {}),
+    }
     try {
       await recordDesktopUpdateArtifact(app.getPath('userData'), artifact)
     } catch (cause) {
@@ -733,24 +804,63 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       return
     }
 
-    const result = await this.showUpdateMessageBox({
-      type: 'info',
-      title: copy.updateDownloadedTitle,
-      message: copy.updateReady(version),
-      detail: copy.windowsInstallQuestion,
-      buttons: [copy.restartAndInstall, copy.later],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-    })
-    if (result.response !== 0) return
+    if (options.silent !== true) {
+      const result = await this.showUpdateMessageBox({
+        type: 'info',
+        title: copy.updateDownloadedTitle,
+        message: copy.updateReady(version),
+        detail: copy.windowsInstallQuestion,
+        buttons: [copy.restartAndInstall, copy.later],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      })
+      if (result.response !== 0) return
+    }
 
     const spec = this.scheduled
     if (spec === undefined) throw new Error('dsh-plugin-desktop: no active shell can exit for update installation')
     signal.throwIfAborted()
-    await this.launchWindowsUpdateInstaller(artifactPath)
+    await this.launchWindowsUpdateInstaller(artifactPath, options.silent === true)
     this.quitting = true
     spec.requestQuit(0)
+  }
+
+  /** Present the gsclaw-server update notice; returns whether to download immediately. */
+  private async promptServerUpdate(
+    version: string,
+    notes: readonly string[],
+    mode: 'available' | 'notify-only',
+    availableFrom?: string,
+  ): Promise<boolean> {
+    const copy = desktopNativeCopy(this.currentLocale)
+    if (mode === 'notify-only') {
+      const availability = availableFrom === undefined
+        ? copy.serverUpdatePending
+        : copy.serverUpdateAvailableFrom(new Date(availableFrom).toLocaleString())
+      await this.showUpdateMessageBox({
+        type: 'info',
+        title: copy.updateAvailableTitle,
+        message: copy.updateAvailableMessage(version),
+        detail: [...notes, availability].join('\n'),
+        buttons: [copy.ok],
+        defaultId: 0,
+        noLink: true,
+      })
+      return false
+    }
+
+    const result = await this.showUpdateMessageBox({
+      type: 'info',
+      title: copy.updateAvailableTitle,
+      message: copy.updateAvailableMessage(version),
+      detail: notes.length > 0 ? notes.join('\n') : copy.downloadUpdate,
+      buttons: [copy.upgrade, copy.later],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    return result.response === 0
   }
 
   private async chooseUpdateDestination(
@@ -758,8 +868,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     channel: DesktopReleaseChannel = 'stable',
   ): Promise<string | undefined> {
     if (this.platform !== 'darwin' && this.platform !== 'win32') return undefined
+    return await this.chooseInstallerDestination(desktopUpdateFilename(this.platform, version, channel))
+  }
+
+  private async chooseInstallerDestination(filename: string): Promise<string | undefined> {
+    if (this.platform !== 'darwin' && this.platform !== 'win32') return undefined
     const copy = desktopNativeCopy(this.currentLocale)
-    const filename = desktopUpdateFilename(this.platform, version, channel)
     const extension = this.platform === 'darwin' ? 'dmg' : 'exe'
     const result = await this.showUpdateSaveDialog({
       title: copy.saveInstallerTitle,
@@ -790,6 +904,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const userDataPath = app.getPath('userData')
     const artifact = await pendingDesktopUpdateArtifact(userDataPath, PRODUCT_VERSION, this.platform)
     if (artifact === undefined) return
+    if (artifact.managed === true) {
+      // Server-channel installers live in the managed updates directory; the
+      // upgrade that superseded them already ran, so remove them silently.
+      await resolveDesktopUpdateArtifact(userDataPath, artifact, true)
+      return
+    }
     const copy = desktopNativeCopy(this.currentLocale)
     const result = await this.showUpdateMessageBox({
       type: 'question',
@@ -804,12 +924,15 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     await resolveDesktopUpdateArtifact(userDataPath, artifact, result.response === 0)
   }
 
-  /** Start the downloaded NSIS installer before releasing the current process. */
-  private async launchWindowsUpdateInstaller(installerPath: string): Promise<void> {
+  /**
+   * Start the downloaded NSIS installer before releasing the current process.
+   * @param silent - append `/S` so the installer runs unattended and `--force-run` relaunches the upgraded app.
+   */
+  private async launchWindowsUpdateInstaller(installerPath: string, silent = false): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       let child: ReturnType<typeof spawn>
       try {
-        child = spawn(installerPath, ['--updated', '--force-run'], {
+        child = spawn(installerPath, ['--updated', '--force-run', ...(silent ? ['/S'] : [])], {
           detached: true,
           stdio: 'ignore',
           shell: false,
@@ -917,4 +1040,24 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (profiles.length > 0) items.push(...profiles)
     return items
   }
+}
+
+/**
+ * Prefer the server download URL's basename as the save-dialog default filename.
+ * @param url - direct installer URL from the server appUpdate push.
+ * @param platform - current platform, selecting the required installer extension.
+ * @param version - update version used by the generated fallback name.
+ * @returns the URL basename when it is a safe filename with the right extension, otherwise the generated name.
+ */
+function serverUpdateFilename(
+  url: string,
+  platform: DesktopDownloadPlatform,
+  version: string,
+): string {
+  const extension = platform === 'darwin' ? '.dmg' : '.exe'
+  try {
+    const name = new URL(url).pathname.split('/').pop() ?? ''
+    if (/^[A-Za-z0-9._-]+$/u.test(name) && name.toLowerCase().endsWith(extension)) return name
+  } catch { /* fall through to the generated filename */ }
+  return desktopUpdateFilename(platform, version)
 }

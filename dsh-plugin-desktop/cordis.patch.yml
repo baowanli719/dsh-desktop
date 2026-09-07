@@ -19,6 +19,8 @@
       name: dsh-plugin-desktop/profiles
     - id: desktop-updates
       name: dsh-plugin-desktop/updates
+    - id: desktop-server-updates
+      name: dsh-plugin-desktop/server-updates
     - id: server-skill-provider
       name: dsh-plugin-desktop/server-skill-provider
     # Global prompt section pinning agent replies to Simplified Chinese; it

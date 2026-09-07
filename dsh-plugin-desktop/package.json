@@ -79,6 +79,10 @@
       "types": "./lib/types/updates.d.ts",
       "default": "./lib/updates.js"
     },
+    "./server-updates": {
+      "types": "./lib/types/server-updates.d.ts",
+      "default": "./lib/server-updates.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

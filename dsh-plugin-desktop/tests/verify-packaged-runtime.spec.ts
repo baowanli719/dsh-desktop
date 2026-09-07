@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import AdmZip from 'adm-zip'
 import {
   afterPack,
+  ALLOWED_PACKAGED_CLIENT_EXTERNALS,
   REQUIRED_DSH_CLI_RUNTIME_ENTRIES,
   REQUIRED_PACKAGED_RUNTIME_ENTRIES,
   REQUIRED_MACOS_UNIVERSAL_ENTRIES,
@@ -13,6 +14,7 @@ import {
   resolvePackagedAsarPath,
   resolvePackagedUnpackedRoot,
   smokePackagedDiagnosticWorker,
+  verifyPackagedClientExternals,
   verifyUnpackedArchiveMirror,
   verifyPackagedRuntime,
   type ArchiveLister,
@@ -20,6 +22,7 @@ import {
   type PackageResolver,
   type PackagedRuntimeContext,
   type PackagedDiagnosticWorkerLauncher,
+  type PackagedTextReader,
 } from '../scripts/verify-packaged-runtime.ts'
 import { FORBIDDEN_MACOS_UNIVERSAL_ENTRIES } from '../scripts/mac-universal.ts'
 
@@ -42,6 +45,16 @@ function completeArchiveEntries(separator = '/'): string[] {
 
 function completePackageResolver(unpackedRoot: string): PackageResolver {
   return specifier => join(unpackedRoot, 'resolved', `${specifier.replaceAll('/', '-')}.js`)
+}
+
+/** Client bundle fixture whose external requires stay on the allowlist. */
+function cleanClientBundleReader(): PackagedTextReader {
+  return () => [
+    '"use strict";',
+    'var React = require("react");',
+    'var jsxRuntime = require(\'react/jsx-runtime\');',
+    'var ReactDOM = require("react-dom");',
+  ].join('\n')
 }
 
 describe('packaged desktop runtime verification', () => {
@@ -136,7 +149,7 @@ describe('packaged desktop runtime verification', () => {
     const unpackedRoot = `${expectedPath}.unpacked`
     const resolvePackage = vi.fn<PackageResolver>(completePackageResolver(unpackedRoot))
 
-    verifyPackagedRuntime(context('/build', platform), list, exists, resolvePackage)
+    verifyPackagedRuntime(context('/build', platform), list, exists, resolvePackage, cleanClientBundleReader())
 
     expect(resolvePackagedAsarPath(context('/build', platform))).toBe(expectedPath)
     expect(list).toHaveBeenCalledOnce()
@@ -175,6 +188,7 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       exists,
       completePackageResolver(unpackedRoot),
+      cleanClientBundleReader(),
     )
     expect(exists).toHaveBeenCalledTimes(
       REQUIRED_UNPACKED_RUNTIME_ENTRIES.length
@@ -289,6 +303,7 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       () => true,
       resolvePackage,
+      cleanClientBundleReader(),
     )).toThrow(
       `packaged runtime at ${unpackedRoot} cannot resolve required package export dsh-plugin-desktop/profiles`,
     )
@@ -308,6 +323,7 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       () => true,
       resolvePackage,
+      cleanClientBundleReader(),
     )).toThrow(
       `packaged runtime at ${unpackedRoot} cannot resolve required package export ${specifier}`,
     )
@@ -327,8 +343,72 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       () => true,
       resolvePackage,
+      cleanClientBundleReader(),
     )).toThrow(
       `required package export @deepseek-ai/dsh-base/package.json resolved outside ${unpackedRoot}: ${escapedPath}`,
     )
+  })
+
+  it('tracks the client bundle externals allowlist against the tsdown external seam', () => {
+    expect(ALLOWED_PACKAGED_CLIENT_EXTERNALS).toEqual([
+      'react',
+      'react/jsx-runtime',
+      'react-dom',
+      'react-dom/client',
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-client-ui-slots',
+      '@deepseek-ai/dsh-client-ui-renderer',
+      '@deepseek-ai/dsh-client-ui-primitives',
+    ])
+  })
+
+  it('accepts a packaged client bundle whose externals stay on the allowlist', () => {
+    const unpackedRoot = join('/build', 'resources', 'app.asar.unpacked')
+    const readText = vi.fn<PackagedTextReader>(cleanClientBundleReader())
+
+    verifyPackagedClientExternals(unpackedRoot, readText)
+
+    expect(readText).toHaveBeenCalledWith(join(unpackedRoot, 'lib', 'client.js'))
+  })
+
+  it('rejects a packaged client bundle that keeps an unknown external require', () => {
+    const unpackedRoot = join('/build', 'resources', 'app.asar.unpacked')
+    const readText: PackagedTextReader = () => [
+      'var React = require("react");',
+      'var grammar = require(\'@deepseek-ai/dsh-file-reference/grammar\');',
+      'var other = require( "lodash" );',
+      'var duplicate = require("@deepseek-ai/dsh-file-reference/grammar");',
+    ].join('\n')
+
+    expect(() => verifyPackagedClientExternals(unpackedRoot, readText)).toThrow(
+      'keeps external requires outside the allowlist: @deepseek-ai/dsh-file-reference/grammar, lodash',
+    )
+    expect(() => verifyPackagedClientExternals(unpackedRoot, readText)).toThrow(
+      'Client bundle externals drift — inline the package in tsdown noExternal or extend the allowlist deliberately.',
+    )
+  })
+
+  it('rejects a packaged runtime when the client bundle is unreadable', () => {
+    const unpackedRoot = join('/build', 'resources', 'app.asar.unpacked')
+    const readText: PackagedTextReader = () => { throw new Error('ENOENT') }
+
+    expect(() => verifyPackagedClientExternals(unpackedRoot, readText)).toThrow(
+      `packaged runtime at ${unpackedRoot} is missing the browser client bundle lib/client.js`,
+    )
+  })
+
+  it('fails loud when the packaged client bundle drifts from the externals allowlist', () => {
+    const runtimeContext = context('/build', 'win32')
+    const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
+    const readText: PackagedTextReader = () =>
+      'var grammar = require("@deepseek-ai/dsh-file-reference/grammar");'
+
+    expect(() => verifyPackagedRuntime(
+      runtimeContext,
+      () => completeArchiveEntries(),
+      () => true,
+      completePackageResolver(unpackedRoot),
+      readText,
+    )).toThrow('keeps external requires outside the allowlist: @deepseek-ai/dsh-file-reference/grammar')
   })
 })
