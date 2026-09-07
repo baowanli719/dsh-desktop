@@ -131,7 +131,30 @@ ClientConfig 的 `appUpdate` 字段(`GsAppUpdateConfig`,`src/server/gs-contract.
 
 ClientConfig 的 `brand` 字段(`{ name?, headline? } | null`,单语言、不随 locale 翻译)配置桌面产品的品牌名与欢迎页大标题;管理端经既有 `PUT /api/admin/client-config` 合并修改,无需新端点。客户端解析链(`src/server/gs-brand.ts`):**ClientConfig 推送优先**,其次 userData 下的 `gs-brand.json` 缓存(与 `gs-endpoint.json` 同级的硬化读写:0600 原子写、lstat/有界读/形状校验,损坏即忽略),最后是内置默认(`办公 Agent` / `探索未至之境`)。登录窗之前的免登录 `GET /api/v1/meta` 同样可携带 `brand`,`getMeta()` 成功即更新 store 并落缓存,服务端未上线该字段时自动省略、客户端全部回退默认文案。每次生效值变化都会同步进程内 holder(`src/brand.ts`),主进程文案模块(`native-dialog-copy.ts`、`recovery-copy.ts`、`setup-wizard-copy.ts`、`login-copy.ts`、`tray-locale.ts`、`update-lifecycle.ts`、`notifications.ts`、`workspace-admission.ts` 与主窗口标题)统一以 `{brand}` 占位符经 `interpolateBrand` 解析。
 
-渲染进程不直接持有 ClientConfig:Host 暴露同源路由 `GET /api/gs-server/brand`(`GsBrandView`),`src/client/gs-brand-api.ts` 提供严格解析器;侧边栏品牌名(`desktop-brand.tsx`)与设置/技能页的 `t()` 包装在挂载时拉取,失败回退字典默认。欢迎页大标题上游无槽位,由 `patches/dsh-client-ui-conversation@0.1.2-alpha.1.patch` 让 `EmptyHero` 优先读 `globalThis.__GS_BRAND_HEADLINE__`(桌面 client 入口在挂载 conversation 前写入),未设置时回退上游 locale 字典。权限预设名称走同一注入机制:`src/client/permission-labels.ts` 在挂载 conversation 前把中文名映射(键为预设值)写入 `globalThis.__GS_PERMISSION_LABELS__`,`patches/dsh-client-ui-conversation@0.1.2-alpha.1.patch` 与 `patches/dsh-client-ui-permission-presets@0.1.2-alpha.1.patch` 让 composer 权限下拉、`/permission` 弹层和设置页默认权限行优先读该映射,未覆盖的键回退上游英文变换。品牌变更对已开窗口标题不做热更新,各渲染面在下次挂载/启动时生效。
+渲染进程不直接持有 ClientConfig:Host 暴露同源路由 `GET /api/gs-server/brand`(`GsBrandView`),`src/client/gs-brand-api.ts` 提供严格解析器;侧边栏品牌名(`desktop-brand.tsx`)与设置/技能页的 `t()` 包装在挂载时拉取,失败回退字典默认。欢迎页大标题上游无槽位,由 `patches/dsh-client-ui-conversation@0.1.2-rc.1.patch` 让 `EmptyHero` 优先读 `globalThis.__GS_BRAND_HEADLINE__`(桌面 client 入口在挂载 conversation 前写入),未设置时回退上游 locale 字典。权限预设名称走同一注入机制:`src/client/permission-labels.ts` 在挂载 conversation 前把中文名映射(键为预设值)写入 `globalThis.__GS_PERMISSION_LABELS__`,`patches/dsh-client-ui-conversation@0.1.2-rc.1.patch` 与 `patches/dsh-client-ui-permission-presets@0.1.2-rc.1.patch` 让 composer 权限下拉、`/permission` 弹层和设置页默认权限行优先读该映射,未覆盖的键回退上游英文变换。品牌变更对已开窗口标题不做热更新,各渲染面在下次挂载/启动时生效。
+
+## 客户端补丁与打包约定
+
+### 上游客户端补丁清单
+
+桌面 UI 定制通过根 `package.json` resolutions 的 `patch:` 协议打到上游客户端包:每个补丁对 `npm:0.1.2-rc.1` 与 `npm:^0.1.2-rc.1` 两条描述符各接一行,补丁文件按 `patches/<包名>@<版本>.patch` 命名。当前生效的六条:
+
+- `dsh-session-log-export@0.1.2-rc.1.patch`:给会话头部"Session 日志"下载按钮加 `data-dsh-session-log-download="action"` 锚点;`src/client/session-log-button.ts` 的 CSS 按 `sessionLogButton` 设置(默认隐藏)控制显隐。
+- `dsh-client-ui-conversation@0.1.2-rc.1.patch`:欢迎页大标题优先读 `__GS_BRAND_HEADLINE__`;权限下拉读 `__GS_PERMISSION_LABELS__` / `__GS_PERMISSION_DESCRIPTIONS__`;权限自动模式的中文文案("全自动")与警示样式。
+- `dsh-client-ui-permission-presets@0.1.2-rc.1.patch`:`/permission` 弹层与设置页默认权限行同样优先读 `__GS_PERMISSION_LABELS__`。
+- `dsh-client-ui-commands@0.1.2-rc.1.patch`:`/` 根菜单把指令折叠进"指令"钻取行(空查询只返回该行),带面包屑返回。
+- `dsh-client-ui-skill@0.1.2-rc.1.patch`:`/` 根菜单空查询不再平铺技能,交给桌面"技能"钻取行。
+- `dsh-client-ui-input-trigger@0.1.2-rc.1.patch`:候选图标扩展 `skill`/`goal`/`command` 三种(`renderDesktopCandidateIcon`);源可声明 `launchers`,编程拉起(加号按钮 `toggleSource("command")`)时伴随源一起进菜单——桌面源(`src/client/composer-actions.ts`)声明 `launchers: ['command']` 才会出现在加号菜单,候选上的 `icon: 'skill' | 'goal'` 依赖同一补丁渲染。
+
+**升级上游版本时必须逐一移植补丁并改接线。** 2026-09-04 的 alpha.1→rc.1 合并把 resolutions 整体换成不带补丁的 `file:` 行,六条补丁静默失效(session 日志按钮复现、加号菜单丢桌面项),补丁文件孤儿化且没有任何报错。移植时对已安装包跑 `git apply --check -p1` 验证,再跑 `dsh-plugin-desktop/tests/client-permission-labels.spec.ts` 等补丁内容断言。注意本机 `core.autocrlf=true` 会让 `git apply` 把产物写成 CRLF,用 `diff --strip-trailing-cr` 重新生成补丁。
+
+### 客户端 bundle 模块表纪律
+
+渲染进程的 `require` 只解析两类词:平台种子词(react、react-dom、cordis、`dsh-client-store`、`dsh-client-ui-slots`、`dsh-client-ui-primitives` 等)与声明了 `dsh.client` 的动态包行;`dsh.client.inject` 只是信息性边,不往模块表加模块。`@deepseek-ai/dsh-file-reference` 没有 client 行,桌面 client bundle 必须把它内联(`dsh-plugin-desktop/tsdown.config.ts` 的 `noExternal`,与上游 preset 的 INLINE_SAFE 分类一致);一旦外置成运行时 `require`,整个桌面 client 入口激活失败,界面表现为 "Unknown client plugin"。`tests/package.spec.ts` 的 "keeps every client bundle require on a module-table word" 扫描构建产物钉死这条纪律。
+
+### Windows 安装器约定
+
+NSIS 使用 assisted 安装器(`oneClick: false`、`perMachine: false`、`allowElevation: true`、`allowToChangeInstallationDirectory: true`):安装时必须由用户确认安装路径。`build/` 下不配置 license 文件,安装器不出现协议页;应用内首启配置向导由 `DESKTOP_SETUP_WIZARD_ENABLED = false`(`src/product-identity.ts`)关闭。产物为 `gs-worker-<version>-x64-Setup.exe`(安装器)与 `gs-worker-<version>-x64-Portable.exe`(便携包)。`oneClick: true` 会静默安装、跳过路径确认,stable 不要打开;`tests/package.spec.ts` 的 nsis 断言钉住整组开关。
 
 ## 兼容性说明
 

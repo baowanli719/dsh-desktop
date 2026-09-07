@@ -35,6 +35,7 @@ describe('Desktop local-window policy', () => {
     expect(window.options).toEqual({
       title: 'Local action',
       width: 480,
+      icon: expect.stringMatching(/app-icon\.png$/u),
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -53,6 +54,16 @@ describe('Desktop local-window policy', () => {
     const event = { preventDefault: vi.fn() }
     window.webListeners.get('will-attach-webview')?.(event)
     expect(event.preventDefault).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a caller-supplied icon over the shared product icon', () => {
+    const window = createDesktopLocalWindow({
+      title: 'Local action',
+      icon: 'C:\\icons\\caller.ico',
+      partition: 'dsh-local-action',
+    }) as unknown as InstanceType<typeof electron.BrowserWindow>
+
+    expect(window.options.icon).toBe('C:\\icons\\caller.ico')
   })
 
   it.each(['', 'persist:dsh-local-action', 'shared-session'])(

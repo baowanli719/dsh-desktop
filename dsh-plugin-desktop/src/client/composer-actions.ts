@@ -27,7 +27,7 @@ export interface TokenSpan {
 export interface InputTriggerCandidate {
   readonly name: string
   readonly description?: string
-  readonly icon?: 'file' | 'folder' | 'session'
+  readonly icon?: 'file' | 'folder' | 'session' | 'skill' | 'goal' | 'command'
   readonly value?: string
   readonly drill?: boolean
 }
@@ -55,6 +55,8 @@ export interface InputTriggerSource {
   readonly trigger: '/' | '@'
   readonly name: string
   readonly order?: number
+  /** Programmatic launchers this source accompanies; patched upstream shares the launcher's menu. */
+  readonly launchers?: readonly string[]
   readonly showGroupTitle?: boolean
   candidates(
     session: { readonly sessionId: SessionId },
@@ -127,11 +129,12 @@ function rootCandidates(position: 'leading' | 'inline'): readonly InputTriggerCa
     },
     {
       name: '技能',
+      icon: 'skill',
       value: SKILLS_ACTION,
       drill: true,
     },
     ...(position === 'leading'
-      ? [{ name: '目标', value: GOAL_ACTION } satisfies InputTriggerCandidate]
+      ? [{ name: '目标', icon: 'goal', value: GOAL_ACTION } satisfies InputTriggerCandidate]
       : []),
   ]
 }
@@ -157,6 +160,7 @@ export function createDesktopComposerActionSource(
     trigger: '/',
     name: DESKTOP_COMPOSER_ACTION_SOURCE,
     order: -100,
+    launchers: ['command'],
     showGroupTitle: false,
     async candidates(_session, request) {
       if (request.query.startsWith(DESKTOP_SKILL_MENU_PREFIX)) {

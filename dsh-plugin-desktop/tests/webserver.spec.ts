@@ -29,6 +29,36 @@ async function occupy(): Promise<{ server: Server; port: number }> {
   return { server, port: address.port }
 }
 
+/** Hold `length` consecutive loopback ports starting at a discovered free base. */
+async function occupyRange(length: number): Promise<number> {
+  for (let tries = 0; tries < 20; tries += 1) {
+    const probe = await occupy()
+    const base = probe.port
+    const held: Server[] = []
+    let complete = true
+    for (let offset = 1; offset < length; offset += 1) {
+      const server = createServer()
+      try {
+        await new Promise<void>((resolve, reject) => {
+          server.once('error', reject)
+          server.listen(base + offset, '127.0.0.1', () => resolve())
+        })
+        held.push(server)
+        occupied.push(server)
+      } catch {
+        complete = false
+        await new Promise<void>(resolve => server.close(() => resolve()))
+        break
+      }
+    }
+    if (complete) return base
+    await Promise.all(held.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))))
+    occupied.splice(occupied.indexOf(probe.server), 1)
+    await new Promise<void>(resolve => probe.server.close(() => resolve()))
+  }
+  throw new Error('could not find a free consecutive port range for the test')
+}
+
 async function startWebServer(access?: DesktopBrowserAccess): Promise<DesktopWebServer> {
   const context = new Context()
   contexts.push(context)
@@ -97,6 +127,18 @@ describe('Desktop WebServer port policy', () => {
     await context.plugin(DesktopWebServer, { host: '127.0.0.1', port: 0 })
 
     expect(context.get('webServer')?.port).toBeGreaterThan(0)
+  })
+
+  it('falls back to an OS-assigned port when every retry candidate is in use', async () => {
+    const base = await occupyRange(DESKTOP_WEB_PORT_RETRY_LIMIT + 1)
+    const context = new Context()
+    contexts.push(context)
+
+    await context.plugin(DesktopWebServer, { host: '127.0.0.1', port: base })
+
+    const selectedPort = context.get('webServer')?.port ?? 0
+    expect(selectedPort).toBeGreaterThan(0)
+    expect(selectedPort < base || selectedPort > base + DESKTOP_WEB_PORT_RETRY_LIMIT).toBe(true)
   })
 })
 

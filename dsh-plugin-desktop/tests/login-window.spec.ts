@@ -192,6 +192,7 @@ describe('DesktopLoginWindow', () => {
       show: true,
       maximizable: false,
       fullscreenable: false,
+      icon: expect.stringMatching(/app-icon\.png$/u),
       webPreferences: expect.objectContaining({
         contextIsolation: true,
         nodeIntegration: false,

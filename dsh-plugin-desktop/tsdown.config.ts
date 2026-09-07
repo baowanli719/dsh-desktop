@@ -83,9 +83,12 @@ export default defineConfig([
       '@deepseek-ai/dsh-client-ui-renderer',
       '@deepseek-ai/dsh-client-ui-primitives',
     ],
-    noExternal: (id: string) => id.startsWith('@deepseek-ai/dsh-file-reference')
-      ? true
-      : id.startsWith('@deepseek-ai/') ? undefined : true,
+    // dsh-file-reference declares no dsh.client row, so the renderer module
+    // table cannot answer a bare require for it; upstream classifies it
+    // inline-safe, and the bundle must carry its own copy.
+    noExternal: (id: string) => id === '@deepseek-ai/dsh-file-reference'
+      || id.startsWith('@deepseek-ai/dsh-file-reference/')
+      || !id.startsWith('@deepseek-ai/') ? true : undefined,
     outputOptions: {
       entryFileNames: 'client.js',
       banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(PACKAGE_NAME)}, factory: (require) => {`,

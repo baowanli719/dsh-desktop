@@ -1,7 +1,7 @@
 diff --git a/lib/client.js b/lib/client.js
 --- a/lib/client.js
 +++ b/lib/client.js
-@@ -9,6 +9,15 @@ window.__ModuleLoader__.load({
+@@ -9,6 +9,15 @@
  		let react_jsx_runtime = require("react/jsx-runtime");
  		let react = require("react");
  		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
@@ -17,7 +17,7 @@ diff --git a/lib/client.js b/lib/client.js
  		//#region ../../context/file-reference/src/grammar.ts
  		/**
  		* Extract an `@path` or `@"path with spaces` token at the cursor. An `@`
-@@ -378,21 +387,23 @@ window.__ModuleLoader__.load({
+@@ -377,21 +386,23 @@
  					this.dismiss();
  					return;
  				}
@@ -45,7 +45,7 @@ diff --git a/lib/client.js b/lib/client.js
  			}
  			/**
  			* Pointer pick from MenuView: route the clicked candidate through onPick
-@@ -988,10 +999,7 @@ window.__ModuleLoader__.load({
+@@ -1002,10 +1013,7 @@
  								item.icon !== void 0 && (0, react_jsx_runtime.jsx)("span", {
  									className: MenuView_module_css_default.itemIcon,
  									"aria-hidden": true,
@@ -60,7 +60,7 @@ diff --git a/lib/client.js b/lib/client.js
 diff --git a/lib/types/types.d.ts b/lib/types/types.d.ts
 --- a/lib/types/types.d.ts
 +++ b/lib/types/types.d.ts
-@@ -28,7 +28,7 @@ export type PickVia = 'menu' | 'space' | 'enter';
+@@ -28,7 +28,7 @@
  /** What a pick asks for: resolve the candidate, or drill into it in place. */
  export type PickAction = 'pick' | 'drill';
  /** Leading glyph token of one menu candidate, mapped to its SVG by the menu view. */
@@ -69,7 +69,7 @@ diff --git a/lib/types/types.d.ts b/lib/types/types.d.ts
  /** One menu candidate. Pure display data — zero behavior declaration. */
  export interface InputTriggerCandidate {
      readonly name: string;
-@@ -131,6 +131,11 @@ export interface InputTriggerSource {
+@@ -131,6 +131,11 @@
      readonly name: string;
      /** Menu group display order (lower = higher in the list; default 0). */
      readonly order?: number;

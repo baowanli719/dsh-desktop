@@ -1,7 +1,7 @@
 diff --git a/lib/client.js b/lib/client.js
 --- a/lib/client.js
 +++ b/lib/client.js
-@@ -479,6 +479,8 @@ window.__ModuleLoader__.load({
+@@ -479,6 +479,8 @@
  			for (const score of previous) best = Math.max(best, score);
  			return best === noMatch ? void 0 : best;
  		}
@@ -10,7 +10,7 @@ diff --git a/lib/client.js b/lib/client.js
  		/** Case-insensitive fuzzy filtering with stable ordering for equal matches. */
  		function fuzzyCandidates(candidates, rawQuery) {
  			const query = rawQuery.toLowerCase();
-@@ -533,8 +535,10 @@ window.__ModuleLoader__.load({
+@@ -533,8 +535,10 @@
  				ctx.effect(() => inputTriggers.registerSource({
  					trigger: "/",
  					name: "command",
@@ -21,7 +21,7 @@ diff --git a/lib/client.js b/lib/client.js
  					matchSpace: (session, token) => this.matchSpace(session, token),
  					matchEnter: (session, line, signal, envelope) => this.matchEnter(session, line, signal, envelope),
  					warm: (session) => {
-@@ -639,6 +643,14 @@ window.__ModuleLoader__.load({
+@@ -639,6 +643,14 @@
  			}
  			/** Menu candidates: host catalog + contribution availability, then position filtering and fuzzy name ranking. */
  			async candidates(session, req) {
@@ -36,7 +36,7 @@ diff --git a/lib/client.js b/lib/client.js
  				const list = await this.directory.ensureReady(session.sessionId, req.signal);
  				const rows = [];
  				const seen = /* @__PURE__ */ new Set();
-@@ -658,10 +670,20 @@ window.__ModuleLoader__.load({
+@@ -658,10 +670,20 @@
  						description: contribution.description
  					});
  				}
