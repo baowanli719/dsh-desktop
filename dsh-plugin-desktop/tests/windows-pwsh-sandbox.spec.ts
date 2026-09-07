@@ -4,6 +4,7 @@ import {
   adaptWindowsAclExecution,
   desktopWindowsPwshConfig,
   desktopWindowsPwshPath,
+  desktopWindowsTerminalEnv,
   type WindowsAclAdaptation,
 } from '../src/windows-pwsh-sandbox.ts'
 const RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
@@ -185,6 +186,26 @@ describe('Windows Electron PowerShell sandbox adaptation', () => {
       if (previousRunAsNode === undefined) delete process.env[RUN_AS_NODE]
       else process.env[RUN_AS_NODE] = previousRunAsNode
     }
+  })
+
+  it('supplies UTF-8 terminal defaults when the caller provides no environment', () => {
+    expect(desktopWindowsTerminalEnv()).toEqual({
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
+    })
+  })
+
+  it('keeps caller entries and lets the caller override the UTF-8 defaults', () => {
+    const env = Object.freeze({ KEEP: 'value', PYTHONUTF8: '0' })
+
+    const result = desktopWindowsTerminalEnv(env)
+
+    expect(result).toEqual({
+      PYTHONUTF8: '0',
+      PYTHONIOENCODING: 'utf-8',
+      KEEP: 'value',
+    })
+    expect(env).toEqual({ KEEP: 'value', PYTHONUTF8: '0' })
   })
 })
 

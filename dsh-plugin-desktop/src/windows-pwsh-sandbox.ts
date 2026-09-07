@@ -3,7 +3,7 @@
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { win32 } from 'node:path'
-import type { ShellExecSpec, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
+import type { ShellExecRequest, ShellExecSpec, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { SandboxPwshExecutor } from '@deepseek-ai/dsh-pwsh-sandbox'
 import type { Config as PwshConfig } from '@deepseek-ai/dsh-pwsh-local'
 
@@ -62,6 +62,27 @@ export function desktopWindowsPwshConfig(
 }
 
 /**
+ * UTF-8 defaults for the model-facing Windows terminal. The subprocess
+ * collector decodes child output as UTF-8, but native children such as Python
+ * encode piped stdout in the host code page (GBK on zh-CN hosts) and ignore
+ * the upstream PowerShell console-encoding pin, so non-ASCII text in command
+ * output — produced DOCX paths included — otherwise arrives garbled.
+ */
+export const DESKTOP_WINDOWS_UTF8_ENV = {
+  PYTHONUTF8: '1',
+  PYTHONIOENCODING: 'utf-8',
+} as const
+
+/**
+ * Layer the desktop UTF-8 defaults under one caller-provided environment:
+ * explicit `env` entries and the managed `dshEnv` snapshot still merge after
+ * them and win.
+ */
+export function desktopWindowsTerminalEnv(env?: Record<string, string>): Record<string, string> {
+  return { ...DESKTOP_WINDOWS_UTF8_ENV, ...env }
+}
+
+/**
  * Insert the desktop Node-mode trampoline for the exact upstream ACL runner.
  * @param spec - resolved PowerShell execution spec.
  * @param argv - argv after the upstream sandbox provider has confined it.
@@ -96,6 +117,12 @@ export function adaptWindowsAclExecution(
 export class DesktopWindowsPwshSandbox extends SandboxPwshExecutor {
   constructor(ctx: ConstructorParameters<typeof SandboxPwshExecutor>[0], config: PwshConfig) {
     super(ctx, desktopWindowsPwshConfig(config, process.env, process.platform))
+  }
+
+  /** Stamp the desktop UTF-8 defaults onto every resolved spec's environment. */
+  override resolve(request: ShellExecRequest): ShellExecSpec {
+    const spec = super.resolve(request)
+    return { ...spec, env: desktopWindowsTerminalEnv(spec.env) }
   }
 
   private adapt(spec: ShellExecSpec, argv: readonly string[]): AdaptedWindowsAclExecution {
