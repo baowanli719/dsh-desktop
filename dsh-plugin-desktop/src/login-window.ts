@@ -2,6 +2,7 @@
 
 import { BrowserWindow } from 'electron'
 import { fileURLToPath } from 'node:url'
+import { desktopAppIconPath } from './app-icon.ts'
 import {
   auxiliaryWindowChromeOptions,
   auxiliaryWindowHasCustomFrame,
@@ -129,6 +130,7 @@ export class DesktopLoginWindow {
     const customFrame = auxiliaryWindowHasCustomFrame(input.platform)
     const window = new BrowserWindow({
       title: copy.title,
+      icon: desktopAppIconPath(input.platform),
       ...auxiliaryWindowChromeOptions(input.platform),
       width: 440,
       height: 700,

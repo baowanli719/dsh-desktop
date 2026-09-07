@@ -1,6 +1,7 @@
 /** Fixed Electron security policy for Desktop-owned local HTML windows. */
 
 import { BrowserWindow, type BrowserWindowConstructorOptions } from 'electron'
+import { desktopAppIconPath } from './app-icon.ts'
 
 export interface DesktopLocalWindowOptions extends Omit<BrowserWindowConstructorOptions, 'webPreferences'> {
   /** Dedicated in-memory session partition for this local workflow. */
@@ -16,6 +17,8 @@ export function createDesktopLocalWindow(options: DesktopLocalWindowOptions): Br
     throw new TypeError('dsh-plugin-desktop: local window partition must be a dedicated in-memory dsh-* partition')
   }
   const window = new BrowserWindow({
+    // Caller-supplied icon entries still win over the shared product icon.
+    icon: desktopAppIconPath(),
     ...windowOptions,
     webPreferences: {
       contextIsolation: true,
