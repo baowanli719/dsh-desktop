@@ -1,4 +1,4 @@
-/** Desktop-owned WebServer wrapper with bounded bind-conflict retry. */
+/** Desktop-owned WebServer wrapper with bounded bind-conflict retry and an OS-assigned fallback. */
 
 import type { ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
@@ -104,14 +104,22 @@ export class DesktopWebServer extends WebServer {
         await super[Service.init]()
         return
       } catch (cause) {
-        const nextPort = requestedPort + attempt + 1
-        if (!isAddressInUse(cause)
-          || attempt >= DESKTOP_WEB_PORT_RETRY_LIMIT
-          || nextPort > 65_535) {
-          throw cause
-        }
+        if (!isAddressInUse(cause)) throw cause
         closeFailedServer(this)
-        this.desktopConfig.port = nextPort
+        const nextPort = requestedPort + attempt + 1
+        if (attempt < DESKTOP_WEB_PORT_RETRY_LIMIT && nextPort <= 65_535) {
+          this.desktopConfig.port = nextPort
+          continue
+        }
+        // Windows NAT (WSL2/Hyper-V) can silently reserve a contiguous block
+        // covering the whole retry range; an OS-assigned port keeps Host boot
+        // alive instead of dropping into Recovery Mode.
+        this.ctx.logger.warn(
+          `dsh-plugin-desktop: loopback ports ${String(requestedPort)}-${String(this.desktopConfig.port)} are all in use; falling back to an OS-assigned port`,
+        )
+        this.desktopConfig.port = 0
+        await super[Service.init]()
+        return
       }
     }
   }
