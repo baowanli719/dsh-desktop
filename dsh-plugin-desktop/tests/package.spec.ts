@@ -747,7 +747,7 @@ describe('published package surface', () => {
 
   it('fixes the installed application identity', () => {
     expect(workspaceManifest.version).toBeUndefined()
-    expect(manifest.version).toBe('2.0.5')
+    expect(manifest.version).toBe('2.0.6')
     expect(manifest.build?.productName).toBe('gs-worker')
     expect(manifest.build?.appId).toBe('com.enterprise.officeagent')
     expect(manifest.build?.asarUnpack).toEqual([
@@ -791,7 +791,6 @@ describe('published package surface', () => {
     expect(manifest.build?.win?.artifactName).toBe('gs-worker-${version}-${arch}-Portable.${ext}')
     expect(manifest.build?.nsis).toEqual({
       include: 'installer.nsh',
-      license: 'THIRD_PARTY_NOTICES.md',
       oneClick: false,
       perMachine: false,
       allowElevation: true,

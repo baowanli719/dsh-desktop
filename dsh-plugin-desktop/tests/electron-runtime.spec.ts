@@ -7,7 +7,9 @@ const terminal = vi.hoisted(() => ({ open: vi.fn() }))
 const diagnostics = vi.hoisted(() => ({ export: vi.fn() }))
 const updater = vi.hoisted(() => ({
   download: vi.fn(),
+  downloadFromUrl: vi.fn(),
   filename: vi.fn(),
+  managedDirectory: vi.fn(),
   pending: vi.fn(),
   record: vi.fn(),
   resolve: vi.fn(),
@@ -60,7 +62,9 @@ vi.mock('../src/diagnostic-export.ts', () => ({
 
 vi.mock('../src/update-download.ts', () => ({
   desktopUpdateFilename: updater.filename,
+  desktopUpdateManagedDirectory: updater.managedDirectory,
   downloadDesktopUpdate: updater.download,
+  downloadDesktopUpdateFromUrl: updater.downloadFromUrl,
   pendingDesktopUpdateArtifact: updater.pending,
   recordDesktopUpdateArtifact: updater.record,
   resolveDesktopUpdateArtifact: updater.resolve,
@@ -328,6 +332,9 @@ describe('Electron desktop runtime', () => {
     childProcess.reset()
     vi.clearAllMocks()
     updater.download.mockReset()
+    updater.downloadFromUrl.mockReset()
+    updater.managedDirectory.mockReset()
+    updater.managedDirectory.mockResolvedValue('/tmp/dsh-desktop-user-data/updates')
     updater.filename.mockReset()
     updater.filename.mockImplementation((platform: string, version: string) => (
       `gs-worker-${version}-${platform === 'darwin' ? 'mac.dmg' : 'windows.exe'}`
@@ -1578,7 +1585,7 @@ describe('Electron desktop runtime', () => {
         appExecutable: process.execPath,
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.5',
+        productVersion: '2.0.6',
         profileDir: expect.stringMatching(/profiles[\\/]+desktop$/u),
         homeDir: expect.stringContaining('dsh-desktop-user-data'),
         spawn: expect.any(Function),
@@ -1614,7 +1621,7 @@ describe('Electron desktop runtime', () => {
     expect(diagnostics.export).toHaveBeenCalledWith(
       expect.stringContaining('dsh-desktop-user-data'),
       expect.objectContaining({
-        appVersion: '2.0.5',
+        appVersion: '2.0.6',
         crashDumpsDir: expect.stringMatching(/[\\/]Crashpad$/u),
       }),
     )
@@ -1897,7 +1904,7 @@ describe('Electron desktop runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.5',
+      currentVersion: '2.0.6',
       statePath: join('/tmp/dsh-desktop-user-data', 'updates', 'state.json'),
     })
     electron.app.isPackaged = true
@@ -2127,6 +2134,187 @@ describe('Electron desktop runtime', () => {
       }),
     )
     expect(updater.resolve).toHaveBeenCalledWith('/tmp/dsh-desktop-user-data', artifact, remove)
+  })
+
+  it('silently removes a managed server-update installer after the upgrade', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const artifact = {
+      platform: 'win32' as const,
+      version: '2.0.1',
+      path: join('/tmp/dsh-desktop-user-data', 'updates', 'gs-worker-2.0.1-x64-Setup.exe'),
+      managed: true,
+    }
+    updater.pending.mockResolvedValueOnce(artifact)
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule(spec)
+
+    await runtime.mountScheduled()
+    await vi.waitFor(() => { expect(updater.resolve).toHaveBeenCalledOnce() })
+
+    expect(updater.resolve).toHaveBeenCalledWith('/tmp/dsh-desktop-user-data', artifact, true)
+    expect(electron.dialog.showMessageBox).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: 'Remove Update Installer' }),
+    )
+  })
+
+  it('prompts a server update with an upgrade button and installs silently on Windows', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const serverUrl = 'https://gsclaw.example.com/gsworker/downloads/gs-worker-2.1.0-x64-Setup.exe'
+    const managedPath = join('/tmp/dsh-desktop-user-data', 'updates', 'gs-worker-2.1.0-x64-Setup.exe')
+    updater.downloadFromUrl.mockResolvedValueOnce(managedPath)
+    const requestQuit = vi.fn()
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule({ ...spec, requestQuit })
+
+    electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
+    const serverUpdates = runtime.updates.serverUpdates
+    expect(serverUpdates).toBeDefined()
+    await expect(serverUpdates?.promptUpdate('2.1.0', ['Bug fixes'], 'available')).resolves.toBe(false)
+    expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        title: '办公 Agent Update Available',
+        message: '办公 Agent 2.1.0 is available.',
+        detail: 'Bug fixes',
+        buttons: ['Upgrade', 'Later'],
+      }),
+    )
+
+    electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 0, checkboxChecked: false })
+    await expect(serverUpdates?.promptUpdate('2.1.0', ['Bug fixes'], 'available')).resolves.toBe(true)
+
+    const controller = new AbortController()
+    const pending = serverUpdates?.downloadAndOpen(serverUrl, '2.1.0', controller.signal)
+    expect(pending).toBeDefined()
+    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
+
+    expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled()
+    expect(updater.managedDirectory).toHaveBeenCalledWith('/tmp/dsh-desktop-user-data')
+    expect(updater.downloadFromUrl).toHaveBeenCalledWith({
+      url: serverUrl,
+      platform: 'win32',
+      version: '2.1.0',
+      destinationPath: managedPath,
+      request: expect.any(Function),
+      signal: controller.signal,
+    })
+    expect(updater.record).toHaveBeenCalledWith('/tmp/dsh-desktop-user-data', {
+      platform: 'win32',
+      version: '2.1.0',
+      path: managedPath,
+      managed: true,
+    })
+    const downloadingNotification = electron.notifications[0]
+    expect(downloadingNotification?.options).toEqual({
+      title: '办公 Agent Update Available',
+      body: 'Downloading 办公 Agent 2.1.0. It will be installed automatically when the download completes.',
+    })
+    expect(electron.dialog.showMessageBox).toHaveBeenCalledTimes(2)
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      managedPath,
+      ['--updated', '--force-run', '/S'],
+      {
+        detached: true,
+        stdio: 'ignore',
+        shell: false,
+        windowsHide: true,
+      },
+    )
+    expect(requestQuit).not.toHaveBeenCalled()
+    childProcess.emit('spawn')
+    await pending
+    expect(childProcess.child.unref).toHaveBeenCalledOnce()
+    expect(requestQuit).toHaveBeenCalledWith(0)
+  })
+
+  it('notifies and propagates a failed server-update download without dialogs on Windows', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    updater.downloadFromUrl.mockRejectedValueOnce(new Error('offline'))
+    const requestQuit = vi.fn()
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule({ ...spec, requestQuit })
+
+    await expect(runtime.updates.serverUpdates?.downloadAndOpen(
+      'https://gsclaw.example.com/gsworker/downloads/gs-worker-2.1.0-x64-Setup.exe',
+      '2.1.0',
+      new AbortController().signal,
+    )).rejects.toThrow('offline')
+
+    expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled()
+    expect(electron.dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(electron.notifications.map(notification => notification.options)).toEqual([
+      {
+        title: '办公 Agent Update Available',
+        body: 'Downloading 办公 Agent 2.1.0. It will be installed automatically when the download completes.',
+      },
+      {
+        title: '办公 Agent Update Available',
+        body: '办公 Agent 2.1.0 could not be downloaded. Please try again later.',
+      },
+    ])
+    expect(childProcess.spawn).not.toHaveBeenCalled()
+    expect(requestQuit).not.toHaveBeenCalled()
+  })
+
+  it('downloads a server update into the managed directory and opens the DMG on macOS', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const serverUrl = 'https://gsclaw.example.com/gsworker/downloads/gs-worker-2.1.0-arm64.dmg'
+    const managedPath = join('/tmp/dsh-desktop-user-data', 'updates', 'gs-worker-2.1.0-arm64.dmg')
+    updater.downloadFromUrl.mockResolvedValueOnce(managedPath)
+    const requestQuit = vi.fn()
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule({ ...spec, requestQuit })
+
+    await runtime.updates.serverUpdates?.downloadAndOpen(serverUrl, '2.1.0', new AbortController().signal)
+
+    expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled()
+    expect(updater.downloadFromUrl).toHaveBeenCalledWith(expect.objectContaining({
+      url: serverUrl,
+      platform: 'darwin',
+      version: '2.1.0',
+      destinationPath: managedPath,
+    }))
+    expect(updater.record).toHaveBeenCalledWith('/tmp/dsh-desktop-user-data', {
+      platform: 'darwin',
+      version: '2.1.0',
+      path: managedPath,
+      managed: true,
+    })
+    expect(electron.shell.openPath).toHaveBeenCalledWith(managedPath)
+    expect(electron.dialog.showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: '办公 Agent Update Downloaded',
+        buttons: ['OK'],
+      }),
+    )
+    expect(childProcess.spawn).not.toHaveBeenCalled()
+    expect(requestQuit).not.toHaveBeenCalled()
+  })
+
+  it('offers no download button for a notify-only server update', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+
+    await expect(runtime.updates.serverUpdates?.promptUpdate(
+      '2.1.0',
+      ['Bug fixes'],
+      'notify-only',
+      '2030-07-01T00:00:00.000Z',
+    )).resolves.toBe(false)
+
+    expect(electron.dialog.showMessageBox).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        title: '办公 Agent Update Available',
+        buttons: ['OK'],
+        detail: expect.stringContaining('This update can be downloaded starting'),
+      }),
+    )
+    expect(updater.downloadFromUrl).not.toHaveBeenCalled()
   })
 
   it('rejects a macOS handoff when the operating system cannot open the DMG', async () => {
