@@ -646,7 +646,10 @@ async function start(): Promise<void> {
     await app.whenReady()
     startupStage = 'shell-environment'
     lifecycleRecorder.transitionStartupStage(startupStage)
-    if (process.platform === 'win32') app.setAppUserModelId(DESKTOP_APP_ID)
+    if (process.platform === 'win32') {
+      // Unpackaged Electron shortcuts must not join the installed product's taskbar group.
+      app.setAppUserModelId(app.isPackaged ? DESKTOP_APP_ID : `${DESKTOP_APP_ID}.development`)
+    }
     if (app.isPackaged && process.cwd() === '/') process.chdir(app.getPath('home'))
     const shellEnvironmentResolution = await resolveDesktopShellEnvironment({
       environment: process.env,

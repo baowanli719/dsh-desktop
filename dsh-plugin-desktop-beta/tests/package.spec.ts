@@ -100,7 +100,7 @@ describe('published package surface', () => {
     expect(productIdentity).toContain("appId: 'ai.deepseek.dsh.desktop.beta'")
     expect(productIdentity).toContain('DESKTOP_PRODUCT_IDENTITY = DESKTOP_RELEASE_IDENTITIES.beta')
     expect(productIdentity).toContain('OTHER_DESKTOP_PRODUCT_IDENTITY = DESKTOP_RELEASE_IDENTITIES.stable')
-    expect(main).toContain('app.setAppUserModelId(DESKTOP_APP_ID)')
+    expect(main).toContain('app.setAppUserModelId(app.isPackaged ? DESKTOP_APP_ID : `${DESKTOP_APP_ID}.development`)')
     const setName = main.indexOf('app.setName(PRODUCT_NAME)')
     const start = main.indexOf('await start()', setName)
     const lock = main.indexOf('app.requestSingleInstanceLock()')
