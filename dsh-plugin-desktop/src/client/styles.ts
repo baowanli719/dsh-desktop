@@ -45,8 +45,8 @@ body:is([data-dsh-desktop-mode="extended"], [data-dsh-desktop-mode="advanced"]) 
 .dshDesktopFrame[data-dragging] .dshDesktopResizeHandle { transition: none; }
 .dshDesktopNoDrag, button, input, textarea, select, label, summary, a, [contenteditable="true"], [role="button"], [role="checkbox"], [role="dialog"], [role="menuitem"], [role="option"], [role="switch"], [role="tab"] { -webkit-app-region: no-drag !important; }
 [role="dialog"], [aria-modal="true"] { -webkit-app-region: no-drag !important; }
-/* On Windows the session title row doubles as the compact drag strip. Its
-   interactive descendants remain no-drag through the shared control rule. */
+/* On Windows the header includes draggable padding and space around tabs.
+   Interactive descendants remain no-drag through the shared control rule. */
 body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] [data-slot="conversation"] header {
   padding-top: 20px;
   padding-right: 78px;
@@ -54,7 +54,11 @@ body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] [data-
 body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"][data-dsh-sidebar-collapsed] [data-slot="conversation"] header {
   padding-right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 12}px;
 }
-body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] [data-slot="conversation"] header > :first-child { -webkit-app-region: drag; }
+body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"]
+  :is([data-slot="conversation.session.header"] > header, [data-slot="sidebar"] :has(> button [data-slot="sidebar.brand.mark"])) {
+  user-select: none;
+  -webkit-app-region: drag;
+}
 /* better-sidebar owns its toggle cluster coordinates. Its title-bar
    compatibility preset follows the measured native inset; Desktop only
    anchors the cluster to the moving conversation edge. */

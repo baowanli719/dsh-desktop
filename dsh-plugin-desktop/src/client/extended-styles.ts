@@ -165,7 +165,11 @@ body[data-dsh-desktop-mode="extended"]:not([data-dsh-desktop-material="off"]) {
   padding: 0 8px 0 ${MACOS_TRAFFIC_LIGHT_SAFE_WIDTH + 8}px;
 }
 .dshDesktopFrameTitlebar[data-platform="win32"] {
-  padding: 0 0 0 8px;
+  /* A full-width no-drag layer also removes the header's native drag region,
+     even with pointer-events:none. Confine it to the caption buttons. */
+  left: auto;
+  width: ${WINDOWS_CAPTION_CONTROLS_WIDTH}px;
+  padding: 0;
   background: transparent;
   pointer-events: none;
   -webkit-app-region: no-drag;
@@ -503,10 +507,17 @@ body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extende
 body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"][data-dsh-sidebar-collapsed] [data-slot="conversation"] header {
   padding-right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 12}px;
 }
-body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [data-slot="conversation"] header > :first-child {
+/* Include header padding and the space around tabs, not just the title row.
+   The sidebar brand row is anchored through its public slot; its buttons keep
+   their existing actions. Document headers inside messages are not chrome. */
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"]
+  :is([data-slot="conversation.session.header"] > header, [data-slot="sidebar"] :has(> button [data-slot="sidebar.brand.mark"])) {
+  user-select: none;
   -webkit-app-region: drag;
 }
-body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [data-slot="conversation"] header :is(button, a, input, textarea, select, [role="button"]) {
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"]
+  :is([data-slot="conversation.session.header"], [data-slot="sidebar"])
+  :is(.dshDesktopNoDrag, button, a, input, textarea, select, label, summary, [contenteditable="true"], [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="menuitem"], [role="option"], [role="dialog"]) {
   -webkit-app-region: no-drag;
 }
 body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [class*="toggleCluster"] {
