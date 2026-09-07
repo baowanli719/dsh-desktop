@@ -142,6 +142,12 @@ export const zh = {
   skillsAllSwitchedOff: '{count} 个技能被服务端管控关闭。',
   skillsPartiallySwitchedOff: '另有 {count} 个技能被服务端管控关闭，未在上方列出。',
   skillsSyncedAt: '最近同步',
+  skillsExecDesktop: '桌面执行',
+  skillsExecDataQuery: '服务端数据查询',
+  skillsExecServerMcp: '服务端 MCP',
+  skillsExecutionUnsupported: '当前服务端版本不支持服务端技能执行，仅提供桌面执行技能。',
+  skillsUnavailableRuntime: '当前桌面端不支持此技能的执行类型，无法调用。',
+  skillsUnavailableDefinition: '技能定义同步失败，暂时无法调用。',
 } as const
 
 export type DesktopSettingsLocaleKey = keyof typeof zh
@@ -288,4 +294,10 @@ export const en: Record<DesktopSettingsLocaleKey, string> = {
   skillsAllSwitchedOff: '{count} skills have been switched off by server controls.',
   skillsPartiallySwitchedOff: '{count} more skills are switched off by server controls and not listed above.',
   skillsSyncedAt: 'Last synced',
+  skillsExecDesktop: 'Desktop',
+  skillsExecDataQuery: 'Server data query',
+  skillsExecServerMcp: 'Server MCP',
+  skillsExecutionUnsupported: 'The connected server does not support server-side skill execution; only desktop-executed skills are available.',
+  skillsUnavailableRuntime: 'This desktop build does not support this skill type; the skill cannot be invoked.',
+  skillsUnavailableDefinition: 'The skill definition failed to sync; it cannot be invoked right now.',
 }

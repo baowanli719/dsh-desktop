@@ -2,6 +2,7 @@
 
 import {
   GS_SERVER_SKILLS_PATH,
+  type GsSkillExecutionKind,
   type GsSkillViewItem,
   type GsSkillsView,
 } from '../server/gs-contract.ts'
@@ -15,6 +16,9 @@ const MAX_SKILL_COUNT = 500
 const MAX_NAME_LENGTH = 256
 const MAX_TEXT_LENGTH = 2048
 const MAX_SYNCED_AT_LENGTH = 64
+const MAX_RUNTIME_TYPES = 16
+
+const EXECUTION_KINDS = new Set(['desktop', 'server-data-query', 'server-mcp'])
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -39,7 +43,13 @@ export function parseGsSkillsView(value: unknown): GsSkillsView {
     || (value.masterOff !== undefined && typeof value.masterOff !== 'boolean')
     || (value.switchedOff !== undefined
       && (typeof value.switchedOff !== 'number' || !Number.isInteger(value.switchedOff)
-        || value.switchedOff < 0 || value.switchedOff > MAX_SKILL_COUNT))) {
+        || value.switchedOff < 0 || value.switchedOff > MAX_SKILL_COUNT))
+    || (value.execution !== undefined
+      && (!isObject(value.execution)
+        || typeof value.execution.supported !== 'boolean'
+        || !Array.isArray(value.execution.types)
+        || value.execution.types.length > MAX_RUNTIME_TYPES
+        || value.execution.types.some((type: unknown) => !isBoundedName(type))))) {
     throw new Error('dsh-plugin-desktop: invalid gs-server skills response')
   }
   const skills: GsSkillViewItem[] = []
@@ -49,7 +59,12 @@ export function parseGsSkillsView(value: unknown): GsSkillsView {
       || typeof item.description !== 'string'
       || item.description.length > MAX_TEXT_LENGTH
       || !isOptionalBoundedText(item.displayName)
-      || !isOptionalBoundedText(item.version)) {
+      || !isOptionalBoundedText(item.version)
+      || !isOptionalBoundedText(item.runtimeType)
+      || (item.execution !== undefined
+        && (typeof item.execution !== 'string' || !EXECUTION_KINDS.has(item.execution)))
+      || (item.available !== undefined && typeof item.available !== 'boolean')
+      || !isOptionalBoundedText(item.unavailableReason)) {
       throw new Error('dsh-plugin-desktop: invalid gs-server skill entry')
     }
     skills.push(Object.freeze({
@@ -57,6 +72,10 @@ export function parseGsSkillsView(value: unknown): GsSkillsView {
       ...(item.displayName === undefined ? {} : { displayName: item.displayName }),
       ...(item.version === undefined ? {} : { version: item.version }),
       description: item.description,
+      ...(item.runtimeType === undefined ? {} : { runtimeType: item.runtimeType }),
+      ...(item.execution === undefined ? {} : { execution: item.execution as GsSkillExecutionKind }),
+      ...(item.available === undefined ? {} : { available: item.available }),
+      ...(item.unavailableReason === undefined ? {} : { unavailableReason: item.unavailableReason }),
     }))
   }
   return Object.freeze({
@@ -64,6 +83,12 @@ export function parseGsSkillsView(value: unknown): GsSkillsView {
     ...(value.syncedAt === undefined ? {} : { syncedAt: value.syncedAt }),
     ...(value.masterOff === undefined ? {} : { masterOff: value.masterOff }),
     ...(value.switchedOff === undefined ? {} : { switchedOff: value.switchedOff }),
+    ...(value.execution === undefined ? {} : {
+      execution: Object.freeze({
+        supported: (value.execution as { supported: boolean }).supported,
+        types: Object.freeze([...(value.execution as { types: string[] }).types]),
+      }),
+    }),
     skills: Object.freeze(skills),
   })
 }

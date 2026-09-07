@@ -288,3 +288,33 @@ HTTP 请求设置大小与时长上限，并按用户限制并发。桌面取消
 - 服务端 `docs/server-mcp-skill-design.md`：已有 MCP 技能设计；现状判断以实现代码为准。
 
 服务端路径相对于 `D:\gsclaw-server`，与桌面仓库分属独立 Git 仓库。
+
+## 12. 评审纪要（2026-09-07）
+
+对照 gsclaw-server 实际代码完成核实，结论：方案成立，§2 现状表中各项断言全部属实，主线设计无需调整。以下为核实明细与补充建议。
+
+### 12.1 核实结果（服务端代码依据）
+
+| 方案断言 | 核实结果 |
+| --- | --- |
+| `runtime_type` 三个取值 `client`/`data-query`/`server-mcp` | 属实。`src/routes/adminSkills.ts:213` 上传校验白名单；`src/scripts/initDb.ts:115` 列注释 |
+| `/api/skills` 排除 `server-mcp` | 属实。`src/index.ts:873` 显式 `runtime_type <> 'server-mcp'` 过滤；data-query 技能照常下发（含 `queries.json`），旧客户端暴露范围问题见 §5.2 末段与 §10 第 5 条 |
+| `run_data_query` 读包内 `queries.json`，校验启用与用户授权 | 属实。`src/agent/dataQuery.ts`；每次执行重新查库校验，参数按模板声明逐个校验，行数取模板声明与数据源上限的交集，结果 32KB 截断并写 `chat_logs` 审计。§2 指出的"未检查 `runtime_type`"亦属实，§7 第 4 步要求补上是对的 |
+| `run_mcp_skill` 校验类型、授权、配置、工具白名单 | 属实。`src/agent/mcp/mcpSkillRuntime.ts` 共 14 步，含 inputSchema 兜底校验（`schemaValidator.ts`）与结果结构化截断（`resultFormatter.ts`）。且现状连服务端 Agent 也只允许 `read_only=1`（`read_only=0` 直接拒绝），§7"首期只开放只读 MCP"不是额外限制，而是与现状对齐 |
+| `runDataQuery`/`runMcpSkill` 返回自然语言字符串 | 属实。执行结果以自然语言回灌模型；§5.3 要求抽取结构化结果、禁止用中文关键词判断成败，这条必须保留为实现红线 |
+| 管理后台 ZIP 上传保存 `runtime`，普通创建/编辑无类型写入 | 属实。`adminSkills.ts:104-113` 从 SKILL.md frontmatter 简易解析 `runtime:`；CRUD 路由无类型写入逻辑。§3.3 统一入口的要求必要 |
+| 模型代理不透传工具调用 | 属实。`src/routes/llmProxy.ts` 纯透传；§4 明确不在代理里藏第二套 Agent 循环，判断正确 |
+
+核实中补充的既有事实：
+
+- 工具注册表 `src/agent/tools.ts`（17 个工具）已声明 `risk` 四字段与 `location: 'server' | 'client'`。execute 端点的可调用集合判定应直接复用这两个字段，收紧为"`runtime_type` ∩ `location = 'server'` ∩ risk 允许"，不另建白名单表。
+- MCP 连接管理器（`src/agent/mcp/clientManager.ts`）以 `skillId@configVersion` 为连接缓存键，懒连接。`definitionRevision` 应与该 `configVersion` 同源推进：MCP 重同步、包更新、类型切换同时使两者失效。
+- 令牌纪律与桌面端同构：30 分钟 access token + 30 天旋转 refresh（family 重放整族吊销），§7 的"仅认证阶段 401 才单飞刷新重试一次"可直接落在桌面既有 `authorizedJson` 上，无需新机制。
+- 服务端在线 Agent 的沙箱与审批（`src/agent/policy.ts`、`runToolCall` 于 `src/routes/agent.ts:2091-2261`）绑定 Turn；execute 端点独立 Turn 之外，审批环节以"只读白名单"静态判定替代，与 §7 的顺序校验一致。
+
+### 12.2 补充建议（纳入实施范围）
+
+1. **桥接工具的运行平面显式化**：`run_data_query`/`run_mcp_skill` 必须注册为 Host 平面工具，不进入沙箱工具子进程——访问令牌只存在于 Electron main 进程内存，与 LLM 代理占位令牌同一纪律。§6.2 目前为隐含表述，实施时写入工具插件注释与验收清单（新增一条：沙箱子进程无法继承或解析到任何服务端凭证）。
+2. **`AGENTS.md` 同步义务**：新增桌面工具插件（§9 的 `src/server-skill-tools.ts`）进入 `cordis.patch.yml` 与 profile 断言白名单时，必须同步更新根 `AGENTS.md` 的本地技能禁令条款——该条款目前只覆盖 `skill-filesystem` 与 `tool-skill` 的 canonical 身份约定。
+3. **`report-installed` 语义区分**：远程类型没有本地 bundle，建议服务端 `client_skill_installs`（`initDb.ts:171-207`）为桥接可用集合新增独立来源标记（如 `server-remote`），避免管控清单把"桥接可用"与"本地已装"混为一谈；§6.3 的"不冒充文件安装结果"以此落地。
+4. **并发与连接复用验收标准**：execute 端点独立于 Turn 之后，`mcpClientManager` 懒连接与每数据源小池（limit 2）在多桌面用户并发下的行为需要压测。§7 的"按用户限制并发"应补充量化验收标准（并发上限、排队与超时表现、MCP 连接复用命中率），纳入阶段 1/3 的完成标准。

@@ -12,9 +12,11 @@ import {
   SERVER_SKILL_PROVIDER_NAME,
   SERVER_SKILL_RANK,
   ServerSkillProvider,
+  createGsServerSkillCatalog,
   createGsSkillSyncTracker,
   safeSkillRelativePath,
   stripSkillFrontmatter,
+  type GsServerSkillCatalogController,
   type GsSkillServerFace,
   type GsSkillSyncTracker,
 } from '../src/server-skill-provider.ts'
@@ -44,21 +46,25 @@ interface ProviderHarness {
   readonly controls: { current: Record<string, GsSkillControl> | undefined }
   readonly invalidate: ReturnType<typeof vi.fn<() => void>>
   readonly sync: GsSkillSyncTracker
+  readonly catalog: GsServerSkillCatalogController
   readonly loggerWarn: ReturnType<typeof vi.fn<(format: string, ...param: unknown[]) => void>>
   notifyConfig(): void
   setToken(token: string | undefined): void
+  setUserId(userId: number | undefined): void
 }
 
 function createProvider(
-  handler: (call: RecordedCall) => Response,
+  handler: (call: RecordedCall) => Response | Promise<Response>,
   cacheRoot = temporaryCacheRoot(),
 ): ProviderHarness {
   const calls: RecordedCall[] = []
   let token: string | undefined = 'access-1'
+  let userId: number | undefined = 1
   const controls: { current: Record<string, GsSkillControl> | undefined } = { current: undefined }
   const listeners = new Set<() => void>()
   const invalidate = vi.fn<() => void>()
   const sync = createGsSkillSyncTracker()
+  const catalog = createGsServerSkillCatalog()
   const loggerWarn = vi.fn<(format: string, ...param: unknown[]) => void>()
   const request: GsRequest = async (url, init) => {
     const call = { url, init }
@@ -69,13 +75,14 @@ function createProvider(
     accessToken: () => token,
     refreshAccessToken: async () => 'refreshed-1',
     endpoint: () => ENDPOINT,
+    userId: () => userId,
     skillControls: () => controls.current,
     subscribeConfig: (listener) => {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
     },
   }
-  const provider = new ServerSkillProvider(face, { cacheRoot, request, logger: { warn: loggerWarn } }, {
+  const provider = new ServerSkillProvider(face, { cacheRoot, request, logger: { warn: loggerWarn }, catalog }, {
     signal: new AbortController().signal,
     invalidate,
   }, sync)
@@ -85,9 +92,11 @@ function createProvider(
     controls,
     invalidate,
     sync,
+    catalog,
     loggerWarn,
     notifyConfig() { for (const listener of listeners) listener() },
     setToken(next) { token = next },
+    setUserId(next) { userId = next },
   }
 }
 
@@ -106,6 +115,34 @@ function skill(overrides: Record<string, unknown> = {}): Record<string, unknown>
 }
 
 function skillsResponse(skills: readonly Record<string, unknown>[]): Response {
+  return Response.json({ skills })
+}
+
+/** Legacy handshake: no `skillExecution` field. */
+function metaResponse(capability?: { types: readonly string[] }): Response {
+  return Response.json({
+    serviceName: 'gsclaw-server',
+    serviceVersion: '1.0.0',
+    loginMethods: ['password'],
+    minimumClientVersion: '0.0.0',
+    llmProxy: true,
+    ...(capability === undefined ? {} : { skillExecution: { version: 1, types: capability.types } }),
+  })
+}
+
+function catalogEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    name: 'customer-analysis',
+    displayName: 'Customer Analysis',
+    description: 'Analyses new customers',
+    version: '2.0.0',
+    runtimeType: 'data-query',
+    definitionRevision: 'rev-1',
+    ...overrides,
+  }
+}
+
+function catalogResponse(skills: readonly Record<string, unknown>[]): Response {
   return Response.json({ skills })
 }
 
@@ -178,7 +215,11 @@ describe('ServerSkillProvider.list', () => {
     expect(candidate.rank).toBeGreaterThan(BUNDLED_SKILL_RANK)
     expect(candidate.locator).toEqual({ id: 'skill-1', name: 'code-review', version: '1.0.0' })
     expect(candidate.metadata).toEqual(expect.objectContaining({ version: '1.0.0', runtimeType: 'prompt' }))
-    expect(harness.calls[0]?.url).toBe(`${ENDPOINT}/api/skills`)
+    // The capability handshake runs first; a legacy answer selects /api/skills.
+    expect(harness.calls.map(call => call.url).filter(url => !url.endsWith('report-installed'))).toEqual([
+      `${ENDPOINT}/api/v1/meta`,
+      `${ENDPOINT}/api/skills`,
+    ])
   })
 
   it('returns an empty catalog while signed out without touching the network', async () => {
@@ -258,6 +299,7 @@ describe('ServerSkillProvider.list', () => {
 
   it('reports the effective installed set once per catalog', async () => {
     const harness = createProvider((call) => {
+      if (call.url.endsWith('/api/v1/meta')) return metaResponse()
       if (call.url.endsWith('/api/skills')) return skillsResponse([skill()])
       if (call.url.endsWith('/api/skills/report-installed')) return Response.json({ ok: true })
       throw new Error(`unexpected call ${call.url}`)
@@ -296,7 +338,9 @@ describe('ServerSkillProvider sync tracking', () => {
       displayName: 'Code Review',
       version: '1.0.0',
       description: 'Reviews code changes',
+      runtimeType: 'prompt',
     }])
+    expect(state.execution).toEqual({ supported: false, types: [] })
   })
 
   it('keeps the last good snapshot when a later fetch fails and logs a warning', async () => {
@@ -448,6 +492,247 @@ describe('ServerSkillProvider.get', () => {
     const harness = createProvider(() => filesResponse([textFile('SKILL.md', '# Body\n')]))
     const unsafe = candidateFrom({ locator: { id: 'skill-1', name: 'code-review', version: '../1.0' } })
     await expect(harness.provider.get(unsafe, {})).resolves.toBeUndefined()
+    expect(harness.calls).toHaveLength(0)
+  })
+})
+
+
+/** Handler answering the capability handshake and the v1 catalog with the given entries. */
+function v1Harness(
+  entries: readonly Record<string, unknown>[],
+  extra?: (call: RecordedCall) => Response | undefined,
+  types: readonly string[] = ['data-query', 'server-mcp'],
+): ProviderHarness {
+  return createProvider((call) => {
+    const answered = extra?.(call)
+    if (answered !== undefined) return answered
+    if (call.url.endsWith('/api/v1/meta')) return metaResponse({ types })
+    if (call.url.endsWith('/api/v1/skills/catalog')) return catalogResponse(entries)
+    if (call.url.endsWith('/api/skills/report-installed')) return Response.json({ ok: true })
+    throw new Error(`unexpected call ${call.url}`)
+  })
+}
+
+describe('ServerSkillProvider catalog protocol', () => {
+  it('uses the v1 catalog when the server advertises skillExecution and splits runtime types', async () => {
+    const harness = v1Harness([
+      catalogEntry({ name: 'local-report', runtimeType: 'client' }),
+      catalogEntry(),
+      catalogEntry({ name: 'crm-lookup', runtimeType: 'server-mcp', definitionRevision: 'rev-9' }),
+      catalogEntry({ name: 'mystery', runtimeType: 'shell', version: '3.1.0' }),
+    ])
+
+    const candidates = await harness.provider.list({})
+
+    expect(harness.calls.map(call => call.url).filter(url => !url.endsWith('report-installed'))).toEqual([
+      `${ENDPOINT}/api/v1/meta`,
+      `${ENDPOINT}/api/v1/skills/catalog`,
+    ])
+    expect(candidates.map(candidate => candidate.name)).toEqual(['local-report', 'customer-analysis', 'crm-lookup'])
+    const remote = candidates[1]!
+    expect(remote.locator).toEqual({
+      kind: 'remote',
+      name: 'customer-analysis',
+      version: '2.0.0',
+      runtimeType: 'data-query',
+      revision: 'rev-1',
+    })
+    expect(remote.metadata).toEqual(expect.objectContaining({
+      execution: 'server',
+      runtimeType: 'data-query',
+      definitionRevision: 'rev-1',
+    }))
+
+    const state = harness.sync.snapshot()
+    expect(state.execution).toEqual({ supported: true, types: ['data-query', 'server-mcp'] })
+    expect(state.skills).toEqual([
+      expect.objectContaining({ name: 'local-report', execution: 'desktop', available: true }),
+      expect.objectContaining({ name: 'customer-analysis', execution: 'server-data-query', available: true }),
+      expect.objectContaining({ name: 'crm-lookup', execution: 'server-mcp', available: true }),
+      expect.objectContaining({
+        name: 'mystery',
+        runtimeType: 'shell',
+        available: false,
+        unavailableReason: 'runtime-unsupported',
+      }),
+    ])
+    expect(harness.catalog.snapshot().remotes).toEqual([
+      { name: 'customer-analysis', runtimeType: 'data-query', definitionRevision: 'rev-1' },
+      { name: 'crm-lookup', runtimeType: 'server-mcp', definitionRevision: 'rev-9' },
+    ])
+
+    // Remote types carry no local bundle, so the installed-set report holds
+    // only the client skill, with the unchanged report shape.
+    await vi.waitFor(() => {
+      expect(harness.calls.some(call => call.url.endsWith('report-installed'))).toBe(true)
+    })
+    const report = harness.calls.find(call => call.url.endsWith('report-installed'))!
+    expect(JSON.parse(String(report.init.body))).toEqual({
+      skills: [{ id: 'local-report', name: 'local-report', source: 'server' }],
+    })
+  })
+
+  it('treats a remote type the handshake did not advertise as unavailable', async () => {
+    const harness = v1Harness([catalogEntry()], undefined, ['server-mcp'])
+
+    const candidates = await harness.provider.list({})
+
+    expect(candidates).toEqual([])
+    expect(harness.sync.snapshot().skills).toEqual([
+      expect.objectContaining({ name: 'customer-analysis', available: false, unavailableReason: 'runtime-unsupported' }),
+    ])
+    expect(harness.catalog.snapshot().remotes).toEqual([])
+  })
+
+  it('honors the master and per-skill switches in the v1 catalog', async () => {
+    const harness = v1Harness([catalogEntry(), catalogEntry({ name: 'crm-lookup', runtimeType: 'server-mcp' })])
+    harness.controls.current = { 'crm-lookup': 'off' }
+
+    const candidates = await harness.provider.list({})
+
+    expect(candidates.map(candidate => candidate.name)).toEqual(['customer-analysis'])
+    expect(harness.sync.snapshot().switchedOff).toBe(1)
+    expect(harness.catalog.snapshot().remotes).toEqual([
+      { name: 'customer-analysis', runtimeType: 'data-query', definitionRevision: 'rev-1' },
+    ])
+  })
+
+  it('clears the published catalog on sign-out', async () => {
+    const harness = v1Harness([catalogEntry()])
+    await harness.provider.list({})
+    expect(harness.catalog.snapshot().remotes).toHaveLength(1)
+
+    harness.setToken(undefined)
+    harness.setUserId(undefined)
+    await expect(harness.provider.list({})).resolves.toEqual([])
+
+    expect(harness.sync.snapshot()).toEqual({ status: 'signed-out' })
+    expect(harness.catalog.snapshot()).toEqual({ supported: false, types: [], remotes: [] })
+  })
+})
+
+describe('ServerSkillProvider remote definitions', () => {
+  function definitionResponse(overrides: Record<string, unknown> = {}): Response {
+    return Response.json({
+      name: 'customer-analysis',
+      version: '2.0.0',
+      runtimeType: 'data-query',
+      definitionRevision: 'rev-1',
+      content: '# Analyse new customers\nUse run_data_query.\n',
+      dataQuery: { queries: [{ name: 'customer_summary', params: [] }] },
+      ...overrides,
+    })
+  }
+
+  function remoteCandidate(overrides: Record<string, unknown> = {}): SkillCandidate {
+    return {
+      name: 'customer-analysis',
+      description: 'Analyses new customers',
+      invocation: { modelInvocable: true, userInvocable: true },
+      source: 'server',
+      provider: SERVER_SKILL_PROVIDER_NAME,
+      rank: SERVER_SKILL_RANK,
+      locator: {
+        kind: 'remote',
+        name: 'customer-analysis',
+        version: '2.0.0',
+        runtimeType: 'data-query',
+        revision: 'rev-1',
+      },
+      ...overrides,
+    }
+  }
+
+  function definitionHarness(handler?: (call: RecordedCall) => Response): ProviderHarness {
+    return createProvider((call) => {
+      if (call.url.endsWith('/api/v1/skills/customer-analysis/definition')) {
+        return handler?.(call) ?? definitionResponse()
+      }
+      throw new Error(`unexpected call ${call.url}`)
+    })
+  }
+
+  it('loads the definition content in memory without materializing a bundle', async () => {
+    const harness = definitionHarness()
+
+    const definition = await harness.provider.get(remoteCandidate(), {})
+
+    expect(definition).toBeDefined()
+    expect(definition!.content).toBe('# Analyse new customers\nUse run_data_query.\n')
+    expect(definition!.resourceBase).toBeUndefined()
+    expect(definition!.path).toBeUndefined()
+    expect(definition!.metadata).toEqual(expect.objectContaining({
+      execution: 'server',
+      runtimeType: 'data-query',
+      definitionRevision: 'rev-1',
+    }))
+    expect(harness.calls.map(call => call.url)).toEqual([
+      `${ENDPOINT}/api/v1/skills/customer-analysis/definition`,
+    ])
+  })
+
+  it('caches per revision and refetches when the revision changes', async () => {
+    let revision = 'rev-1'
+    const harness = createProvider((call) => {
+      if (call.url.endsWith('/definition')) return definitionResponse({ definitionRevision: revision })
+      throw new Error(`unexpected call ${call.url}`)
+    })
+
+    await harness.provider.get(remoteCandidate(), {})
+    await harness.provider.get(remoteCandidate(), {})
+    expect(harness.calls).toHaveLength(1)
+
+    revision = 'rev-2'
+    const moved = remoteCandidate({
+      locator: { kind: 'remote', name: 'customer-analysis', version: '2.0.0', runtimeType: 'data-query', revision: 'rev-2' },
+    })
+    const definition = await harness.provider.get(moved, {})
+    expect(definition).toBeDefined()
+    expect(harness.calls.filter(call => call.url.endsWith('/definition'))).toHaveLength(2)
+  })
+
+  it('invalidates the catalog and refuses the load when the definition moved', async () => {
+    const harness = definitionHarness(() => definitionResponse({ definitionRevision: 'rev-2' }))
+
+    await expect(harness.provider.get(remoteCandidate(), {})).resolves.toBeUndefined()
+    expect(harness.invalidate).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks the skill unavailable in the sync snapshot when the definition fetch fails', async () => {
+    const harness = definitionHarness(() => new Response('oops', { status: 500 }))
+    harness.sync.update({
+      status: 'ok',
+      skills: [{ name: 'customer-analysis', description: '', execution: 'server-data-query', available: true }],
+    })
+
+    await expect(harness.provider.get(remoteCandidate(), {})).resolves.toBeUndefined()
+
+    expect(harness.sync.snapshot().skills).toEqual([
+      expect.objectContaining({ name: 'customer-analysis', available: false, unavailableReason: 'definition-error' }),
+    ])
+  })
+
+  it('discards a late definition response from a previous account', async () => {
+    let release: (response: Response) => void = () => {}
+    const harness = createProvider(() => new Promise<Response>((resolve) => { release = resolve }))
+
+    const pending = harness.provider.get(remoteCandidate(), {})
+    harness.setUserId(2)
+    release(definitionResponse())
+
+    await expect(pending).resolves.toBeUndefined()
+    // Nothing was cached under the old account: the next load refetches.
+    const second = harness.provider.get(remoteCandidate(), {})
+    release(definitionResponse())
+    await expect(second).resolves.toBeDefined()
+    expect(harness.calls).toHaveLength(2)
+  })
+
+  it('refuses remote loads while signed out without touching the network', async () => {
+    const harness = definitionHarness()
+    harness.setToken(undefined)
+
+    await expect(harness.provider.get(remoteCandidate(), {})).resolves.toBeUndefined()
     expect(harness.calls).toHaveLength(0)
   })
 })

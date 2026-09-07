@@ -47,6 +47,10 @@
       "types": "./lib/types/server-skill-provider.d.ts",
       "default": "./lib/server-skill-provider.js"
     },
+    "./server-skill-tools": {
+      "types": "./lib/types/server-skill-tools.d.ts",
+      "default": "./lib/server-skill-tools.js"
+    },
     "./prompt-language": {
       "types": "./lib/types/prompt-language.d.ts",
       "default": "./lib/prompt-language.js"
@@ -140,6 +144,7 @@
     "dist:mac": "node scripts/release-mac.ts",
     "dist:mac-smoke": "node scripts/package-mac.ts",
     "dist:win": "node scripts/package-win.ts",
+    "dist:win-fast": "yarn workspace dsh-community-market build && yarn run build && DSH_PACKAGE_CHECK_ALREADY_RAN=1 ELECTRON_BUILDER_COMPRESSION_LEVEL=3 node scripts/package-win.ts",
     "dist:win-portable": "node scripts/package-win-portable.ts",
     "prepack": "yarn run check"
   },

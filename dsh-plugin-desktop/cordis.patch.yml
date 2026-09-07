@@ -21,6 +21,11 @@
       name: dsh-plugin-desktop/updates
     - id: server-skill-provider
       name: dsh-plugin-desktop/server-skill-provider
+    # Host-plane bridge tools (run_data_query / run_mcp_skill) for
+    # server-executed skills. Tokens stay in the main process; the tools
+    # register only while the server catalog advertises matching skills.
+    - id: server-skill-tools
+      name: dsh-plugin-desktop/server-skill-tools
     # Global prompt section pinning agent replies to Simplified Chinese; it
     # joins every agent assembly, including preset agents.
     - id: desktop-prompt-language
