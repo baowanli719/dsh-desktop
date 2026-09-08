@@ -182,7 +182,7 @@ ClientConfig 的 `brand` 字段(`{ name?, headline? } | null`,单语言、不随
 - `dsh-client-ui-permission-presets@0.1.2-rc.1.patch`:`/permission` 弹层与设置页默认权限行同样优先读 `__GS_PERMISSION_LABELS__`。
 - `dsh-client-ui-commands@0.1.2-rc.1.patch`:`/` 根菜单把指令折叠进"指令"钻取行(空查询只返回该行),带面包屑返回。
 - `dsh-client-ui-skill@0.1.2-rc.1.patch`:`/` 根菜单空查询不再平铺技能,交给桌面"技能"钻取行。
-- `dsh-client-ui-input-trigger@0.1.2-rc.1.patch`:候选图标扩展 `skill`/`goal`/`command` 三种(`renderDesktopCandidateIcon`);源可声明 `launchers`,编程拉起(加号按钮 `toggleSource("command")`)时伴随源一起进菜单——桌面源(`src/client/composer-actions.ts`)声明 `launchers: ['command']` 才会出现在加号菜单,候选上的 `icon: 'skill' | 'goal'` 依赖同一补丁渲染。
+- `dsh-client-ui-input-trigger@0.1.2-rc.1.patch`:候选图标扩展 `skill`/`goal`/`command` 三种(`renderDesktopCandidateIcon`);源可声明 `launchers`,编程拉起(加号按钮 `toggleSource("command")`)时伴随源一起进菜单——桌面源(`src/client/composer-actions.ts`)声明 `launchers: ['command']` 才会出现在加号菜单,候选上的 `icon: 'skill' | 'goal'` 依赖同一补丁渲染。菜单不再因所有候选源就绪但为空而自动关闭(仅在所有源都失败、组归零时关闭),而是在列表底部显示本地化空态:`@` 空查询显示"当前工作区没有可引用的文件",`@` 带查询显示"没有匹配的文件或会话","/" 显示"没有匹配的指令"(`empty.at` / `empty.at.query` / `empty.slash` 三个文案键随补丁注入 zh/en 字典与 `MenuKey` 类型)。
 
 **升级上游版本时必须逐一移植补丁并改接线。** 2026-09-04 的 alpha.1→rc.1 合并把 resolutions 整体换成不带补丁的 `file:` 行,六条补丁静默失效(session 日志按钮复现、加号菜单丢桌面项),补丁文件孤儿化且没有任何报错。移植时对已安装包跑 `git apply --check -p1` 验证,再跑 `dsh-plugin-desktop/tests/client-permission-labels.spec.ts` 等补丁内容断言。注意本机 `core.autocrlf=true` 会让 `git apply` 把产物写成 CRLF,用 `diff --strip-trailing-cr` 重新生成补丁。
 
