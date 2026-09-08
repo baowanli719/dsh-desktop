@@ -2049,12 +2049,12 @@ __metadata:
 
 "@deepseek-ai/dsh-client-ui-input-trigger@patch:@deepseek-ai/dsh-client-ui-input-trigger@file%3Avendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-input-trigger-0.1.2-rc.1.tgz#./patches/dsh-client-ui-input-trigger@0.1.2-rc.1.patch::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.2-rc.1
-  resolution: "@deepseek-ai/dsh-client-ui-input-trigger@patch:@deepseek-ai/dsh-client-ui-input-trigger@file%3Avendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-input-trigger-0.1.2-rc.1.tgz%23vendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-input-trigger-0.1.2-rc.1.tgz%3A%3Ahash=1a8336&locator=deepseek-harness-desktop%2540workspace%253A.#./patches/dsh-client-ui-input-trigger@0.1.2-rc.1.patch::version=0.1.2-rc.1&hash=3e0d7d&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-client-ui-input-trigger@patch:@deepseek-ai/dsh-client-ui-input-trigger@file%3Avendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-input-trigger-0.1.2-rc.1.tgz%23vendor/dsh-runtime/0.1.2-rc.1/deepseek-ai-dsh-client-ui-input-trigger-0.1.2-rc.1.tgz%3A%3Ahash=1a8336&locator=deepseek-harness-desktop%2540workspace%253A.#./patches/dsh-client-ui-input-trigger@0.1.2-rc.1.patch::version=0.1.2-rc.1&hash=e0aa90&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     clsx: "npm:^2.0.0"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.2
-  checksum: 10c0/e1f2f3ec616ee7800721250b9dda837c3d858840e3f7bc615c22e32370526f0775f6039fa2091dba2d44d51aecc7cb9c1106398a3de934ccc29d31706063f8d8
+  checksum: 10c0/f2ee0c470a5700390ea1e4e338f96c7fa223e6bf097736edc3c54d0810f00e073cfa2266ff7d01a4ac165b9f03d374a1c14a6256effaa6ecc3b506166d23686c
   languageName: node
   linkType: hard
 
