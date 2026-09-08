@@ -15,6 +15,7 @@ import {
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
+import * as mcpClientPlugin from '@deepseek-ai/dsh-mcp-client'
 import type {} from '@deepseek-ai/dsh-web-app'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import { isDesktopInstallerQuitRequest } from './desktop-installer-quit.ts'
@@ -64,7 +65,7 @@ import { LogFileSink } from './log-files.ts'
 import { maskSecrets } from './mask-secrets.ts'
 import { resolveDesktopShellEnvironment } from './shell-environment.ts'
 import { installProfilePackageResolver } from './module-resolution.ts'
-import { packagedDependencyPath } from './packaged-runtime-path.ts'
+import { packagedDependencyPath, unpackedAsarPath } from './packaged-runtime-path.ts'
 import {
   beginDesktopProfileStartup,
   assertDesktopProfileName,
@@ -206,6 +207,13 @@ import { desktopRecoveryCopy } from './recovery-copy.ts'
 
 const BIN_NAME = DESKTOP_PACKAGE_NAME
 const PRODUCT_NAME = DESKTOP_PRODUCT_NAME
+
+// The server-side vision model is reachable only through the LLM gateway's
+// visionModel allowance (gsclaw-server llmProxy); it never appears in the
+// user-selectable model list pushed to the client.
+const DESKTOP_VISION_MCP_SERVER_NAME = 'vision'
+const DESKTOP_VISION_PROVIDER_ID = 'gs-cloud'
+const DESKTOP_VISION_MODEL_ID = 'qwen36-35b'
 
 /** Require OS-backed secret storage; Linux's plaintext fallback is not sufficient for a CA key. */
 function desktopLanHttpsPrivateKeyProtector(): DesktopLanHttpsPrivateKeyProtector {
@@ -1483,6 +1491,34 @@ async function start(): Promise<void> {
           openTerminal: () => { runtime.openTerminal() },
           requestRestart: () => runtime.requestRestart(),
         })
+        // Bundled vision MCP: exposes the server-side vision model as the
+        // mcp__vision__analyze_image tool over a stdio child. The per-boot
+        // proxy token reaches only this child through the mcp-client config
+        // env carve-out; it still never touches process.env or disk. The
+        // vision model ref is server-confidential (stripped from ClientConfig),
+        // so provider/model stay desktop constants. A mount failure must not
+        // abort the boot; the tool simply stays unavailable.
+        try {
+          await hostCtx.plugin(mcpClientPlugin, {
+            transport: 'stdio',
+            serverName: DESKTOP_VISION_MCP_SERVER_NAME,
+            command: process.execPath,
+            args: [unpackedAsarPath(fileURLToPath(new URL('./mcp-vision-server.js', import.meta.url)))],
+            env: {
+              ELECTRON_RUN_AS_NODE: '1',
+              VISION_PROXY_ORIGIN: gsLlmProxy.origin,
+              VISION_PROXY_TOKEN: gsLlmProxy.token,
+              VISION_PROVIDER_ID: DESKTOP_VISION_PROVIDER_ID,
+              VISION_MODEL_ID: DESKTOP_VISION_MODEL_ID,
+            },
+            toolCallTimeoutMs: 120_000,
+            failOnStartupError: false,
+          })
+        } catch (cause: unknown) {
+          electronLogger.error(
+            `${BIN_NAME}: vision MCP bridge could not be mounted: ${cause instanceof Error ? cause.message : String(cause)}`,
+          )
+        }
         if (prepared.market.effective === 'community-market') {
           await hostCtx.plugin(DesktopPluginsService, {
             profileName: activeProfileName,

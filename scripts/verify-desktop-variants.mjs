@@ -40,6 +40,7 @@ const allowedDifferences = new Set([
   'login-copy.ts',
   'login-window.ts',
   'local-window-policy.ts',
+  'mcp-vision-server.ts',
   'native-dialog-copy.ts',
   'native-ui/desktop-dialog.html',
   'native-ui/login.html',

@@ -82,6 +82,10 @@ Agent loop 从不直连模型提供商。`src/server/gs-llm-proxy.ts` 在本机 
 
 组成侧还有两道闸门:`cordis.patch.yml` 禁用 `llm-deepseek`(直连适配器会绕过代理)与 `ui-settings-models`(模型设置页会把 provider 密钥留在客户端);`src/profile.ts` 的 `filterLlmPatches` 从用户与 home patch 层剥离这些身份的所有提及,`assertEffectiveLlmRows` 在合成后断言被禁行没有复活、且 `llm-pi-ai` / `agent-default-model` 行保持 canonical 包身份。服务端即使推送 `features.customModel: true` 也只记录日志——apiKey 不出服务端,自定义模型设置保持禁用。
 
+### 视觉模型(本地 MCP 桥)
+
+服务端视觉模型(当前 `gs-cloud/qwen36-35b`)不下发进 ClientConfig 模型列表:它在服务端被刻意移出用户可选列表(gsclaw-server 的 `scripts/fix-models-vision.ts`),只以 `models.visionModel` 引用存在。桌面 agent 经本地 MCP 桥使用它:`src/main.ts` 在 Host bootstrap 后以程序化配置挂载上游 `@deepseek-ai/dsh-mcp-client`(stdio 传输),用 `ELECTRON_RUN_AS_NODE` 拉起 `lib/mcp-vision-server.js`(`src/mcp-vision-server.ts`),注册 `mcp__vision__analyze_image` 工具。工具读取本地图片(PNG/JPEG/WebP/GIF,按 magic bytes 判定;原始文件 ≤ 2.5 MB——base64 膨胀后须低于回环代理 4 MiB 与服务端 express 4mb 双上限),以多模态 chat-completions 形态经回环代理 `POST /v1/gs-cloud/chat/completions` 调用视觉模型,返回文本分析。每次 boot 的代理令牌只经 mcp-client `config.env` 显式传给这一个子进程,仍不进入 `process.env` 或磁盘;服务端网关 `llmProxy.resolveProxyTarget` 对 `visionModel` 引用单独放行(不在用户可选白名单内也可代理)。该通路是 MCP 工具而非技能发现,不违反本地技能禁令。
+
 ## 技能链路
 
 桌面产品禁止本地技能发现,技能只从服务端下发。禁令由三道闸执行:

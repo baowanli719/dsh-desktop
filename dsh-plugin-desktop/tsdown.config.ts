@@ -26,6 +26,7 @@ export default defineConfig([
       terminal: 'src/terminal.ts',
       'server-skill-provider': 'src/server-skill-provider.ts',
       'server-skill-tools': 'src/server-skill-tools.ts',
+      'mcp-vision-server': 'src/mcp-vision-server.ts',
       'prompt-language': 'src/prompt-language.ts',
       'update-checker': 'src/update-checker.ts',
       'update-download': 'src/update-download.ts',
