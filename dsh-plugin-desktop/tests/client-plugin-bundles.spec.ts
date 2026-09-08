@@ -71,13 +71,16 @@ describe('stable Renderer client plugin bundles', () => {
 
   it('pins the yarn-patched vision router build', () => {
     expect(packageJson('dsh-vision-router').version).toBe('2.1.3')
-    // patches/dsh-vision-router@2.1.3.patch: the two product gates our
-    // cordis row relies on (deepseekTakeover / updateCheck).
+    // patches/dsh-vision-router@2.1.3.patch: product gates read from the row
+    // config only (deepseekTakeover/updateCheck/freeFallback sticky off) plus
+    // the request-body byte budget enforced in callOpenAICompatible.
     const source = readFileSync(
       join(dirname(require.resolve('dsh-vision-router/package.json')), 'index.js'),
       'utf8',
     )
-    expect(source).toContain('deepseekTakeover')
-    expect(source).toContain('updateCheck')
+    expect(source).toContain('productGates.deepseekTakeover')
+    expect(source).toContain('productGates.updateCheck')
+    expect(source).toContain('productGates.freeFallback')
+    expect(source).toContain('boundInlineImageBytes(body.messages, productGates.maxImageBodyBytes)')
   })
 })

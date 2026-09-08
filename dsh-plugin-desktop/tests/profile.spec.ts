@@ -398,6 +398,7 @@ virtualStoreDirMaxLength: 60
         deepseekTakeover: false,
         updateCheck: false,
         downscaleMaxPixels: 2_000_000,
+        maxImageBodyBytes: 2_800_000,
       }),
     }))
   })
