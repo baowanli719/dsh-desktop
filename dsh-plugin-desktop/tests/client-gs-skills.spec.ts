@@ -84,6 +84,61 @@ describe('parseGsSkillsView', () => {
       .toThrow('invalid gs-server skill entry')
     expect(() => parseGsSkillsView({ status: 'ok', skills: ['code-review'] }))
       .toThrow('invalid gs-server skill entry')
+    expect(() => parseGsSkillsView({ status: 'ok', skills: [{ name: 'x', description: '', available: 'yes' }] }))
+      .toThrow('invalid gs-server skill entry')
+    expect(() => parseGsSkillsView({ status: 'ok', skills: [{ name: 'x', description: '', execution: 'cloud' }] }))
+      .toThrow('invalid gs-server skill entry')
+  })
+
+  it('passes through execution kinds, availability, and the capability block', () => {
+    expect(parseGsSkillsView({
+      status: 'ok',
+      execution: { supported: true, types: ['data-query', 'server-mcp'] },
+      skills: [
+        { name: 'report', description: 'Builds reports', runtimeType: 'client', execution: 'desktop', available: true },
+        {
+          name: 'customer-analysis',
+          description: 'Analyses customers',
+          runtimeType: 'data-query',
+          execution: 'server-data-query',
+          available: true,
+        },
+        {
+          name: 'mystery',
+          description: 'Unknown runtime',
+          runtimeType: 'shell',
+          available: false,
+          unavailableReason: 'runtime-unsupported',
+        },
+      ],
+    })).toEqual({
+      status: 'ok',
+      execution: { supported: true, types: ['data-query', 'server-mcp'] },
+      skills: [
+        { name: 'report', description: 'Builds reports', runtimeType: 'client', execution: 'desktop', available: true },
+        {
+          name: 'customer-analysis',
+          description: 'Analyses customers',
+          runtimeType: 'data-query',
+          execution: 'server-data-query',
+          available: true,
+        },
+        {
+          name: 'mystery',
+          description: 'Unknown runtime',
+          runtimeType: 'shell',
+          available: false,
+          unavailableReason: 'runtime-unsupported',
+        },
+      ],
+    })
+  })
+
+  it('rejects a malformed execution capability block', () => {
+    expect(() => parseGsSkillsView({ status: 'ok', skills: [], execution: { supported: 'yes', types: [] } }))
+      .toThrow('invalid gs-server skills response')
+    expect(() => parseGsSkillsView({ status: 'ok', skills: [], execution: { supported: true, types: [7] } }))
+      .toThrow('invalid gs-server skills response')
   })
 })
 

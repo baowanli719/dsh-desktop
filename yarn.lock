@@ -6316,7 +6316,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@modelcontextprotocol/sdk@npm:^1.12.0, @modelcontextprotocol/sdk@npm:^1.26.0":
+"@modelcontextprotocol/sdk@npm:^1.12.0, @modelcontextprotocol/sdk@npm:^1.26.0, @modelcontextprotocol/sdk@npm:^1.30.0":
   version: 1.30.0
   resolution: "@modelcontextprotocol/sdk@npm:1.30.0"
   dependencies:
@@ -13068,6 +13068,7 @@ __metadata:
     "@electron/asar": "npm:3.4.1"
     "@fontsource-variable/inter": "npm:^5.3.0"
     "@huanlin/dsh-plugin-better-sidebar-plugin-office": "npm:0.2.0"
+    "@modelcontextprotocol/sdk": "npm:^1.30.0"
     "@tailwindcss/vite": "npm:^4"
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^22.20.0"
@@ -13102,6 +13103,7 @@ __metadata:
     vite: "npm:8.2.1"
     vitest: "npm:4.1.8"
     yaml: "npm:^2.9.0"
+    zod: "npm:^4.4.3"
   peerDependencies:
     electron: 43.3.0
   bin:

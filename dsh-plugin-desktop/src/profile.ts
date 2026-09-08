@@ -837,21 +837,29 @@ export function filterLocalSkillPatches(patches: PatchOptions[]): PatchOptions[]
   return filtered
 }
 
-/** Pinned tool-skill identity: the canonical package a surviving row must carry. */
-const TOOL_SKILL_PINNED_ROWS: ReadonlyMap<string, string> = new Map([
+/**
+ * Pinned skill-related identities: the canonical package a surviving enabled
+ * row must carry. `tool-skill` is the model-facing catalog over the ctx.skills
+ * registry; `server-skill-tools` is the Desktop-owned Host-plane bridge
+ * (run_data_query / run_mcp_skill) for server-executed skills, whose tokens
+ * must never leave the main process — so no layer may swap in a same-named
+ * impostor implementation.
+ */
+const SKILL_PINNED_ROWS: ReadonlyMap<string, string> = new Map([
   ['tool-skill', '@deepseek-ai/dsh-tool-skill'],
+  ['server-skill-tools', `${DESKTOP_PACKAGE_NAME}/server-skill-tools`],
 ])
-const TOOL_SKILL_PINNED_PACKAGE_NAMES: ReadonlySet<string> = new Set(TOOL_SKILL_PINNED_ROWS.values())
+const SKILL_PINNED_PACKAGE_NAMES: ReadonlySet<string> = new Set(SKILL_PINNED_ROWS.values())
 
-/** Return whether one Loader row claims the pinned tool-skill identity. */
-function isToolSkillPinnedEntry(entry: { readonly id?: unknown, readonly name?: unknown }): boolean {
-  return (typeof entry.id === 'string' && TOOL_SKILL_PINNED_ROWS.has(entry.id))
-    || (typeof entry.name === 'string' && TOOL_SKILL_PINNED_PACKAGE_NAMES.has(entry.name))
+/** Return whether one Loader row claims a pinned skill-related identity. */
+function isSkillPinnedEntry(entry: { readonly id?: unknown, readonly name?: unknown }): boolean {
+  return (typeof entry.id === 'string' && SKILL_PINNED_ROWS.has(entry.id))
+    || (typeof entry.name === 'string' && SKILL_PINNED_PACKAGE_NAMES.has(entry.name))
 }
 
 /**
  * Assert the composed graph holds no enabled local-skill row, and that any
- * surviving `tool-skill` row keeps its canonical package identity so no layer
+ * surviving pinned skill row keeps its canonical package identity so no layer
  * can swap in a same-named impostor implementation.
  */
 export function assertEffectiveSkillRows(rows: readonly EntryOptions[]): void {
@@ -859,10 +867,10 @@ export function assertEffectiveSkillRows(rows: readonly EntryOptions[]): void {
     if (isLocalSkillEntry(row) && row.disabled !== true) {
       throw new Error(`${BIN_NAME}: local skill provider ${JSON.stringify(row.id ?? row.name)} survived desktop profile composition`)
     }
-    if (isToolSkillPinnedEntry(row) && row.disabled !== true) {
-      const canonical = typeof row.id === 'string' ? TOOL_SKILL_PINNED_ROWS.get(row.id) : undefined
+    if (isSkillPinnedEntry(row) && row.disabled !== true) {
+      const canonical = typeof row.id === 'string' ? SKILL_PINNED_ROWS.get(row.id) : undefined
       if (canonical === undefined || row.name !== canonical) {
-        throw new Error(`${BIN_NAME}: pinned tool-skill row ${JSON.stringify(row.id ?? row.name)} lost its canonical identity in desktop profile composition`)
+        throw new Error(`${BIN_NAME}: pinned skill row ${JSON.stringify(row.id ?? row.name)} lost its canonical identity in desktop profile composition`)
       }
     }
     if (row.group === true && Array.isArray(row.config)) {

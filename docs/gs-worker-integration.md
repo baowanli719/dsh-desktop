@@ -53,9 +53,12 @@ flowchart LR
 | `POST /api/v1/auth/refresh` | 旋转刷新令牌,返回新令牌对与最新 ClientConfig |
 | `POST /api/v1/auth/logout` | 服务端吊销会话族(尽力而为,本地优先清理) |
 | `GET /api/client-config` | 主动拉取生效 ClientConfig |
-| `GET /api/skills` | 服务端技能目录(只下发启用的技能) |
+| `GET /api/skills` | 服务端技能目录(只下发启用的技能;legacy 通路,排除 server-mcp) |
 | `GET /api/skills/:name/files` | 技能 bundle 文件(base64),用于物化本地缓存 |
-| `POST /api/skills/report-installed` | 已装技能集合的 fire-and-forget 上报 |
+| `POST /api/skills/report-installed` | 已装技能集合的 fire-and-forget 上报(仅本地物化的 client 技能) |
+| `GET /api/v1/skills/catalog` | 全类型技能目录(name/version/runtimeType/definitionRevision,服务端预过滤) |
+| `GET /api/v1/skills/:name/definition` | 远程技能的 SKILL.md 正文与参数定义(queries.json / MCP 工具 schema 白名单) |
+| `POST /api/v1/skills/:name/execute` | 服务端执行 data-query 模板或 server-mcp 工具(需回带 definitionRevision) |
 | `POST /api/v1/llm/:providerId/v1/chat/completions` | 模型网关,由 loopback 代理转发 |
 | `POST /api/logs/client` | 客户端运行日志批量上传 |
 
@@ -79,6 +82,10 @@ Agent loop 从不直连模型提供商。`src/server/gs-llm-proxy.ts` 在本机 
 
 组成侧还有两道闸门:`cordis.patch.yml` 禁用 `llm-deepseek`(直连适配器会绕过代理)与 `ui-settings-models`(模型设置页会把 provider 密钥留在客户端);`src/profile.ts` 的 `filterLlmPatches` 从用户与 home patch 层剥离这些身份的所有提及,`assertEffectiveLlmRows` 在合成后断言被禁行没有复活、且 `llm-pi-ai` / `agent-default-model` 行保持 canonical 包身份。服务端即使推送 `features.customModel: true` 也只记录日志——apiKey 不出服务端,自定义模型设置保持禁用。
 
+### 视觉模型(本地 MCP 桥)
+
+服务端视觉模型(当前 `gs-cloud/qwen36-35b`)不下发进 ClientConfig 模型列表:它在服务端被刻意移出用户可选列表(gsclaw-server 的 `scripts/fix-models-vision.ts`),只以 `models.visionModel` 引用存在。桌面 agent 经本地 MCP 桥使用它:`src/main.ts` 在 Host bootstrap 后以程序化配置挂载上游 `@deepseek-ai/dsh-mcp-client`(stdio 传输),用 `ELECTRON_RUN_AS_NODE` 拉起 `lib/mcp-vision-server.js`(`src/mcp-vision-server.ts`),注册 `mcp__vision__analyze_image` 工具。工具读取本地图片(PNG/JPEG/WebP/GIF,按 magic bytes 判定;原始文件 ≤ 2.5 MB——base64 膨胀后须低于回环代理 4 MiB 与服务端 express 4mb 双上限),以多模态 chat-completions 形态经回环代理 `POST /v1/gs-cloud/chat/completions` 调用视觉模型,返回文本分析。每次 boot 的代理令牌只经 mcp-client `config.env` 显式传给这一个子进程,仍不进入 `process.env` 或磁盘;服务端网关 `llmProxy.resolveProxyTarget` 对 `visionModel` 引用单独放行(不在用户可选白名单内也可代理)。该通路是 MCP 工具而非技能发现,不违反本地技能禁令。
+
 ## 技能链路
 
 桌面产品禁止本地技能发现,技能只从服务端下发。禁令由三道闸执行:
@@ -91,7 +98,25 @@ Agent loop 从不直连模型提供商。`src/server/gs-llm-proxy.ts` 在本机 
 
 服务端技能由 `src/server-skill-provider.ts` 提供:它注册进 Host 的 `ctx.skills` registry,rank 取 `BUNDLED_SKILL_RANK + 100`(即 700),保证任何残留本地源都无法以同名技能胜出。目录来自 `GET /api/skills`,再按 ClientConfig 的 `skills` 开关做减法过滤:保留总开关键 `SKILLs`(含大写字母,不是合法技能名,天然不与真实技能冲突)为 `off` 时整个技能功能被禁用、目录为空;逐技能只有显式 `off` 才把该技能移出目录,`on` 或未列出都跟随服务端下发目录(`/api/skills` 本身已只含 enabled 且经授权过滤的技能)——开关表不是白名单。bundle 经 `GET /api/skills/:name/files` 物化到 `<userData>/gs-skills/<name>@<version>`——该响应走网关客户端时上限放宽到 42 MiB(base64 约 4/3 膨胀,覆盖 30 MiB 整包上限;其余接口仍默认 1 MiB),base64 严格校验用线性扫描而非正则(多 MiB 负载会撑爆正则栈);路径必须是不含 `.`/`..` 段的相对路径,单文件 ≤ 8 MiB、整包 ≤ 30 MiB、≤ 500 个文件,缺少 `SKILL.md` 的包拒收;写入采用 staging 目录加 `.complete` 标记后 rename,崩溃不会留下可加载的半成品,同技能旧版本随即清理。无会话或服务端不可达时目录为空,绝不阻塞 Host 启动。每次目录变化后向 `POST /api/skills/report-installed` 做一次去重后的尽力上报。
 
-provider 同时维护一份同步快照(`gsSkillSync` tracker):记录最近一次 `GET /api/skills` 的状态、成功时间、技能 lite 列表,以及 `masterOff`(总开关是否关闭)与 `switchedOff`(被逐技能 `off` 挡掉的技能数),拉取失败时保留上次成功快照并写一条 `warn` 日志。设置页的"技能"区块(`src/client/DesktopSkillsSection.tsx`)展示这份服务器下发技能列表与最近同步时间,数据经私有同源路由 `GET /api/gs-server/skills` 读取,渲染进程同样不接触令牌。空态按优先级区分:`masterOff` 时提示"服务端已禁用技能功能";目录为空但有技能被管控关闭时提示数量("N 个技能被服务端管控关闭");否则提示"服务器暂未下发技能";目录非空且有被挡技能时追加一行数量提示。
+provider 同时维护一份同步快照(`gsSkillSync` tracker):记录最近一次目录同步的状态、成功时间、技能 lite 列表,以及 `masterOff`(总开关是否关闭)与 `switchedOff`(被逐技能 `off` 挡掉的技能数),拉取失败时保留上次成功快照并写一条 `warn` 日志。设置页的"技能"区块(`src/client/DesktopSkillsSection.tsx`)展示这份服务器下发技能列表与最近同步时间,数据经私有同源路由 `GET /api/gs-server/skills` 读取,渲染进程同样不接触令牌。空态按优先级区分:`masterOff` 时提示"服务端已禁用技能功能";目录为空但有技能被管控关闭时提示数量("N 个技能被服务端管控关闭");否则提示"服务器暂未下发技能";目录非空且有被挡技能时追加一行数量提示。
+
+### 服务端技能执行(data-query / server-mcp)
+
+技能的 `runtimeType` 决定执行通路。每次目录同步先做能力握手 `GET /api/v1/meta`:有 `skillExecution` 能力时走新协议 `GET /api/v1/skills/catalog`(含全部三种类型,服务端已做 enabled + 授权 + ClientConfig 过滤);缺该字段的旧服务端回退 legacy `/api/skills`,远程类型不可见、行为与旧版一致。
+
+- `client`:维持 bundle 物化通路不变,设置页标记"桌面执行"。
+- `data-query` / `server-mcp`:**不物化 bundle**。provider 注册"虚拟技能",`SkillDefinition` 的 content 来自 `GET /api/v1/skills/:name/definition`(SKILL.md 正文,服务端已剥 frontmatter),不带 resourceBase;metadata 标记 `execution: 'server'` + runtimeType + definitionRevision。定义缓存为纯内存,按 端点+登录用户+技能名+definitionRevision 隔离;退出登录/切账号时清空,会话变更期间晚到的响应直接丢弃,旧账号内容不会进入新会话。远程类型不进 `report-installed`(无本地安装语义,上报结构不变;v1 目录无 id 字段,client 技能以 name 作为 id 上报)。
+- 未识别或握手未通告的类型:不进候选、绝不降级为本地执行,只在设置页显示为不可用(原因文案区分"执行类型不受支持"与"定义同步失败")。
+
+模型桥接由桌面自有 Host 平面插件 `src/server-skill-tools.ts`(cordis.patch.yml 行 `server-skill-tools`,canonical 身份 `dsh-plugin-desktop/server-skill-tools`,同样被 `assertEffectiveSkillRows` 钉住)提供:注册 `run_data_query` / `run_mcp_skill` 两个工具(与技能 SKILL.md 指令同名),经 `src/server/gs-skill-execution.ts` 调用 `POST /api/v1/skills/:name/execute`。工具跑在 Electron main 进程、注册进 root `ctx.tools` 层(所有 agent 可见,服从既有批准策略),不进沙箱工具子进程——访问令牌只在 main 进程内存,renderer 与模型只见参数与结果。可见性跟随 provider 发布的 `gsServerSkillCatalog` 共享目录:仅当握手通告对应类型且当前有效目录存在该类型可用技能时才注册,目录变化即注销/恢复;同名冲突只告警不崩溃。参数中的技能名必须属于当前有效目录的对应类型(服务端每次执行独立复核授权)。执行纪律:仅认证阶段 401 走单飞刷新重试一次;超时(默认 120s 客户端上限)、断线、5xx、429 都不自动重放;结果保留 traceId 与 truncated,服务端失败按错误回传模型,绝不当作空数据成功。`definition_changed` 触发目录失效刷新,并以"定义已更新,请重新加载技能后按新定义重构调用"作为工具错误返回,不盲重放。
+
+## 交互语言
+
+`src/prompt-language.ts` 在全局系统提示词中约定默认使用简体中文，覆盖每条执行前说明、工具调用间的进度、提问、错误解释、最终回复，以及工具参数中供用户阅读的 `description`、`justification` 等字段。用户明确指定其他交流语言时遵从用户要求；代码、命令、参数键名、路径、日志原文和指定语言的交付内容保留各自语义。英文技能目录、技能正文或工具描述本身不构成切换交流语言的要求。
+
+插件在 `agent/pre-step` 的每个非空步骤中，等待下游上下文注入完成后追加一条中英双语的简短提醒，来源标记为 `dsh-plugin-desktop/prompt-language`。同一待提交消息批次去重；拒绝或空批次不添加提醒，因此不会因提醒而复活已完成的工具循环。插件卸载时，系统提示词段与事件监听一并移除。
+
+这是一项模型提示约束，不是输出翻译器。自动测试验证真实提示词组装、上下文追加顺序、去重与生命周期；实际模型的语言遵循仍需复测。建议使用“中文请求 + 英文技能目录 + 多步工具调用 + Excel 交付”场景，分别检查中间消息、工具说明与最终回复。
 
 ## 日志链路
 
@@ -183,6 +208,8 @@ NSIS 使用 assisted 安装器(`oneClick: false`、`perMachine: false`、`allowE
 - [loopback LLM 代理](../dsh-plugin-desktop/src/server/gs-llm-proxy.ts)
 - [模型 settings 镜像](../dsh-plugin-desktop/src/server/gs-llm-models.ts)
 - [服务端技能 provider](../dsh-plugin-desktop/src/server-skill-provider.ts)
+- [服务端技能执行客户端](../dsh-plugin-desktop/src/server/gs-skill-execution.ts)
+- [服务端技能桥接工具](../dsh-plugin-desktop/src/server-skill-tools.ts)
 - [客户端日志上传](../dsh-plugin-desktop/src/server/gs-log-exporter.ts)
 - [服务端应用更新评估](../dsh-plugin-desktop/src/server-app-update.ts)
 - [profile 组成闸门与断言](../dsh-plugin-desktop/src/profile.ts)

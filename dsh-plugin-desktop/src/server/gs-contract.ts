@@ -12,6 +12,13 @@ export interface GsBrandConfig {
   readonly headline?: string
 }
 
+/** Server skill-execution capability advertised by `GET /api/v1/meta`. */
+export interface GsSkillExecutionCapability {
+  readonly version: number
+  /** Executable runtime types the server bridges; currently `data-query` and `server-mcp`. */
+  readonly types: readonly string[]
+}
+
 /** Server metadata returned by the public `GET /api/v1/meta` handshake. */
 export interface GsServerMeta {
   readonly serviceName: string
@@ -19,6 +26,8 @@ export interface GsServerMeta {
   readonly loginMethods: readonly ('password' | 'email_code')[]
   readonly minimumClientVersion: string
   readonly llmProxy: boolean
+  /** Server skill-execution protocol; absent on servers that predate the field. */
+  readonly skillExecution?: GsSkillExecutionCapability
   /** Pre-login brand delivery; absent on servers that predate the field. */
   readonly brand?: GsBrandConfig | null
 }
@@ -200,6 +209,113 @@ export interface GsInstalledSkillReport {
 }
 
 /* ------------------------------------------------------------------ */
+/* Server skill execution protocol (`/api/v1/skills/*`).              */
+/* ------------------------------------------------------------------ */
+
+/** Runtime types the desktop bridges to server-side execution. */
+export const GS_SERVER_RUNTIME_TYPES = ['data-query', 'server-mcp'] as const
+
+/** One executable server runtime type. */
+export type GsServerRuntimeType = (typeof GS_SERVER_RUNTIME_TYPES)[number]
+
+/** One skill summary from `GET /api/v1/skills/catalog`; the server pre-filters visibility. */
+export interface GsSkillCatalogEntry {
+  readonly name: string
+  readonly displayName: string
+  readonly description: string
+  readonly version: string
+  readonly runtimeType: string
+  /** Opaque revision the execute request must echo back. */
+  readonly definitionRevision: string
+}
+
+/** Success body of `GET /api/v1/skills/catalog`. */
+export interface GsSkillCatalogResponse {
+  readonly skills: readonly GsSkillCatalogEntry[]
+}
+
+/** One declared query-template parameter of a data-query skill. */
+export interface GsSkillQueryParam {
+  readonly name: string
+  readonly type: string
+  readonly required: boolean
+  readonly enum?: readonly string[]
+  readonly description?: string
+}
+
+/** Non-sensitive data-query definition: template names and parameter shapes only. */
+export interface GsSkillDataQueryDefinition {
+  readonly queries: readonly {
+    readonly name: string
+    readonly description?: string
+    readonly params: readonly GsSkillQueryParam[]
+  }[]
+}
+
+/** One allowlisted MCP tool schema of a server-mcp skill. */
+export interface GsSkillMcpTool {
+  readonly name: string
+  readonly description?: string
+  readonly inputSchema?: unknown
+}
+
+/** Success body of `GET /api/v1/skills/:name/definition`. */
+export interface GsSkillDefinitionResponse {
+  readonly name: string
+  readonly version: string
+  readonly runtimeType: string
+  readonly definitionRevision: string
+  /** SKILL.md body with the frontmatter already stripped by the server. */
+  readonly content: string
+  readonly dataQuery?: GsSkillDataQueryDefinition
+  readonly mcp?: { readonly tools: readonly GsSkillMcpTool[] }
+}
+
+/** Request body of `POST /api/v1/skills/:name/execute`. */
+export interface GsSkillExecuteRequest {
+  readonly requestId: string
+  readonly sessionId?: string
+  readonly definitionRevision: string
+  /** data-query: `{ query, params }`; server-mcp: `{ tool, arguments }`. */
+  readonly arguments: Record<string, unknown>
+}
+
+/** One text block of an execute result. */
+export interface GsSkillExecuteContentBlock {
+  readonly type: 'text'
+  readonly text: string
+}
+
+/** Machine codes the execute endpoint reports, in either the HTTP or the result envelope. */
+export const GS_SKILL_EXECUTE_ERROR_CODES = [
+  'skill_unavailable',
+  'runtime_unsupported',
+  'definition_changed',
+  'invalid_arguments',
+  'execution_timeout',
+  'execution_failed',
+  'too_many_requests',
+] as const
+
+/** One execute-endpoint machine error code. */
+export type GsSkillExecuteErrorCode = (typeof GS_SKILL_EXECUTE_ERROR_CODES)[number]
+
+/**
+ * Body of `POST /api/v1/skills/:name/execute`. Business failures keep HTTP 200
+ * with `status: 'error'`; authentication, validation, and concurrency failures
+ * use the HTTP `{ code, message, traceId }` envelope (409 `definition_changed`
+ * adds the current `definitionRevision`).
+ */
+export interface GsSkillExecuteResponse {
+  readonly requestId: string
+  readonly traceId: string
+  readonly status: 'ok' | 'error'
+  readonly content?: readonly GsSkillExecuteContentBlock[]
+  readonly truncated?: boolean
+  readonly error?: { readonly code: string, readonly message?: string }
+}
+
+/* ------------------------------------------------------------------ */
 /* Private renderer routes served by the Host webServer.              */
 /* ------------------------------------------------------------------ */
 
@@ -252,21 +368,37 @@ export interface GsServerMetaView {
   readonly meta: GsServerMeta
 }
 
+/** How one delivered skill executes, for settings-page display. */
+export type GsSkillExecutionKind = 'desktop' | 'server-data-query' | 'server-mcp'
+
 /** Renderer-safe view of one server-delivered skill. */
 export interface GsSkillViewItem {
   readonly name: string
   readonly displayName?: string
   readonly version?: string
   readonly description: string
+  /** Raw server runtime type (`client`, `data-query`, `server-mcp`, or an unrecognized value). */
+  readonly runtimeType?: string
+  /** Resolved execution channel; absent on legacy catalogs. */
+  readonly execution?: GsSkillExecutionKind
+  /** False when the delivered skill cannot execute on this desktop (e.g. unknown runtime type). */
+  readonly available?: boolean
+  /** Machine key for the unavailability cause, rendered through the locale table. */
+  readonly unavailableReason?: string
 }
 
 /** Renderer-safe server-skill sync view; bundle content stays in the main process. */
 export interface GsSkillsView {
   /** Latest synchronization outcome recorded by the server skill provider. */
   readonly status: 'idle' | 'ok' | 'error' | 'signed-out'
-  /** ISO timestamp of the last successful `GET /api/skills`. */
+  /** ISO timestamp of the last successful catalog sync. */
   readonly syncedAt?: string
   readonly skills: readonly GsSkillViewItem[]
+  /** Server skill-execution capability from the meta handshake; absent before the first probe. */
+  readonly execution?: {
+    readonly supported: boolean
+    readonly types: readonly string[]
+  }
   /** Whether the reserved `SKILLs` master switch disabled the whole skill feature. */
   readonly masterOff?: boolean
   /** Count of delivered skills suppressed by a per-skill `off` switch. */

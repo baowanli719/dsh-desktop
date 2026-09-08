@@ -3,9 +3,17 @@
  *
  * Local skill discovery is banned in the desktop product; this provider is the
  * single skill source. It registers into the host plane's `ctx.skills`
- * registry, maps `GET /api/skills` into candidates ranked above any residual
- * local source, and materializes skill bundles from `GET
- * /api/skills/:name/files` into an application-private cache directory.
+ * registry, maps the server catalog into candidates ranked above any residual
+ * local source, and loads skill bodies per runtime type: `client` skills
+ * materialize bundles from `GET /api/skills/:name/files` into an
+ * application-private cache directory, while `data-query` / `server-mcp`
+ * skills stay virtual — their `SkillDefinition` content comes from
+ * `GET /api/v1/skills/:name/definition` and execution goes through the
+ * server-skill-tools bridge.
+ *
+ * Servers without the `skillExecution` meta capability keep the legacy
+ * `GET /api/skills` distribution, where remote types are invisible and every
+ * delivered skill is treated as a desktop-executed bundle, exactly as before.
  */
 
 import { Buffer } from 'node:buffer'
@@ -22,13 +30,19 @@ import {
   type SkillProviderControl,
 } from '@deepseek-ai/dsh-skill'
 import { authorizedJson, type GsRequest } from './server/gs-client.ts'
-import type {
-  GsInstalledSkillReport,
-  GsSkillControl,
-  GsSkillFilesResponse,
-  GsSkillsResponse,
-  GsSkillViewItem,
+import {
+  GS_SERVER_RUNTIME_TYPES,
+  type GsInstalledSkillReport,
+  type GsServerMeta,
+  type GsServerRuntimeType,
+  type GsSkillCatalogResponse,
+  type GsSkillControl,
+  type GsSkillExecutionKind,
+  type GsSkillFilesResponse,
+  type GsSkillsResponse,
+  type GsSkillViewItem,
 } from './server/gs-contract.ts'
+import { GsSkillExecutionClient } from './server/gs-skill-execution.ts'
 import type { GsServerService } from './server/gs-server-service.ts'
 
 /** Stable Cordis plugin name. */
@@ -43,13 +57,99 @@ export const SERVER_SKILL_PROVIDER_NAME = 'gsclaw-server'
 /** Rank above BUNDLED_SKILL_RANK so no residual local source can win a duplicate name. */
 export const SERVER_SKILL_RANK = BUNDLED_SKILL_RANK + 100
 
+/** Server skill-execution capability resolved from the meta handshake. */
+export interface GsSkillExecutionSupport {
+  readonly supported: boolean
+  /** Executable runtime types, intersected with the ones this desktop bridges. */
+  readonly types: readonly GsServerRuntimeType[]
+}
+
+/** One server-executed skill of the current effective catalog. */
+export interface GsServerSkillRemoteEntry {
+  readonly name: string
+  readonly runtimeType: GsServerRuntimeType
+  /** Revision the execute request must echo back. */
+  readonly definitionRevision: string
+}
+
+/** Effective remote-catalog projection consumed by the server-skill-tools bridge. */
+export interface GsServerSkillCatalogSnapshot {
+  /** Whether the server advertised the skill-execution protocol. */
+  readonly supported: boolean
+  readonly types: readonly GsServerRuntimeType[]
+  /** Available server-executed skills of the latest successful sync. */
+  readonly remotes: readonly GsServerSkillRemoteEntry[]
+}
+
+/**
+ * Host-plane share of the effective server catalog. The provider publishes it;
+ * the bridge tools read it to decide visibility and to resolve revisions.
+ */
+export interface GsServerSkillCatalog {
+  snapshot(): GsServerSkillCatalogSnapshot
+  /** Subscribe to catalog changes; returns the unsubscribe function. */
+  subscribe(listener: () => void): () => void
+  /** Invalidate cached catalogs and definitions after a `definition_changed`. */
+  invalidate(): void
+  /** One available remote entry of the requested runtime type, if still listed. */
+  resolveRemote(name: string, runtimeType: GsServerRuntimeType): GsServerSkillRemoteEntry | undefined
+}
+
+/** Provider-owned mutable face of the catalog share. */
+export interface GsServerSkillCatalogController extends GsServerSkillCatalog {
+  update(snapshot: GsServerSkillCatalogSnapshot): void
+  /** Wire the registry invalidation of the active provider registration. */
+  bindInvalidate(invalidate: () => void): void
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Server-skill synchronization snapshot recorded by the provider. */
+    gsSkillSync: GsSkillSyncTracker
+    /** Effective server-executed skill catalog shared with the bridge tools. */
+    gsServerSkillCatalog: GsServerSkillCatalog
+  }
+}
+
+/** Empty catalog published while signed out or against a legacy server. */
+const EMPTY_SERVER_SKILL_CATALOG: GsServerSkillCatalogSnapshot = Object.freeze({
+  supported: false,
+  types: Object.freeze([]),
+  remotes: Object.freeze([]),
+})
+
+/** Create the Host-plane catalog share consumed by the server-skill-tools bridge. */
+export function createGsServerSkillCatalog(): GsServerSkillCatalogController {
+  let state: GsServerSkillCatalogSnapshot = EMPTY_SERVER_SKILL_CATALOG
+  let invalidate: (() => void) | undefined
+  const listeners = new Set<() => void>()
+  return {
+    snapshot: () => state,
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    invalidate() { invalidate?.() },
+    resolveRemote(skillName, runtimeType) {
+      return state.remotes.find(entry => entry.name === skillName && entry.runtimeType === runtimeType)
+    },
+    update(snapshot) {
+      state = snapshot
+      for (const listener of listeners) listener()
+    },
+    bindInvalidate(next) { invalidate = next },
+  }
+}
+
 /** Latest server-skill synchronization snapshot surfaced to the settings page. */
 export interface GsSkillSyncState {
   readonly status: 'idle' | 'ok' | 'error' | 'signed-out'
-  /** ISO timestamp of the last successful `GET /api/skills`. */
+  /** ISO timestamp of the last successful catalog sync. */
   readonly syncedAt?: string
-  /** Lite projection of the last effective catalog. */
+  /** Effective-catalog projection of the last successful sync. */
   readonly skills?: readonly GsSkillViewItem[]
+  /** Server skill-execution capability from the meta handshake. */
+  readonly execution?: GsSkillExecutionSupport
   /** Whether the reserved `SKILLs` master switch disabled the whole skill feature. */
   readonly masterOff?: boolean
   /** Count of delivered skills suppressed by a per-skill `off` switch. */
@@ -60,13 +160,6 @@ export interface GsSkillSyncState {
 export interface GsSkillSyncTracker {
   snapshot(): GsSkillSyncState
   update(state: GsSkillSyncState): void
-}
-
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    /** Server-skill synchronization snapshot recorded by the provider. */
-    gsSkillSync: GsSkillSyncTracker
-  }
 }
 
 /** Create the in-memory tracker provided as the `gsSkillSync` service. */
@@ -98,6 +191,9 @@ const SKILL_CACHE_MARKER = '.complete'
 const SAFE_SKILL_VERSION = /^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$/u
 const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/u
 
+/** In-memory remote-definition cache cap; session changes clear it wholesale. */
+const MAX_REMOTE_DEFINITIONS = 512
+
 /**
  * Strict base64 without a regex: the character-class pattern overflows the
  * regex engine stack on multi-megabyte skill payloads.
@@ -125,6 +221,8 @@ export interface GsSkillServerFace {
   refreshAccessToken(): Promise<string>
   /** Effective gsclaw-server endpoint, read per request. */
   endpoint(): string
+  /** Authenticated user id isolating per-account caches, or undefined while signed out. */
+  userId(): number | undefined
   /** Latest pushed skill switches, or undefined before the first login. */
   skillControls(): Record<string, GsSkillControl> | undefined
   /** Subscribe to ClientConfig changes; returns the unsubscribe function. */
@@ -137,6 +235,7 @@ export function gsSkillServerFace(service: GsServerService): GsSkillServerFace {
     accessToken: () => service.auth.accessToken(),
     refreshAccessToken: () => service.auth.refreshAccessToken(),
     endpoint: () => service.endpoints.resolve(),
+    userId: () => service.auth.snapshot().user?.id,
     skillControls: () => service.clientConfig()?.skills,
     subscribeConfig: (listener) => service.config.subscribe(() => { listener() }),
   }
@@ -149,13 +248,54 @@ export interface ServerSkillProviderOptions {
   readonly request?: GsRequest
   /** Optional logger for sync failures; discovery itself stays silent. */
   readonly logger?: GsSkillSyncLogger
+  /** Catalog share published for the bridge tools; tests may omit it. */
+  readonly catalog?: GsServerSkillCatalogController
 }
 
-/** Opaque candidate locator handed back to `get()`. */
+/** Opaque candidate locator handed back to `get()` for a bundle-backed skill. */
 interface ServerSkillLocator {
   readonly id: string
   readonly name: string
   readonly version: string
+}
+
+/** Opaque candidate locator handed back to `get()` for a server-executed skill. */
+interface RemoteSkillLocator {
+  readonly kind: 'remote'
+  readonly name: string
+  readonly version: string
+  readonly runtimeType: GsServerRuntimeType
+  readonly revision: string
+}
+
+/** Narrow one unknown locator to the remote shape without trusting it. */
+function asRemoteLocator(locator: unknown): RemoteSkillLocator | undefined {
+  if (typeof locator !== 'object' || locator === null) return undefined
+  const record = locator as Partial<RemoteSkillLocator>
+  if (record.kind !== 'remote' || typeof record.name !== 'string'
+    || typeof record.version !== 'string' || typeof record.revision !== 'string'
+    || (record.runtimeType !== 'data-query' && record.runtimeType !== 'server-mcp')) {
+    return undefined
+  }
+  return record as RemoteSkillLocator
+}
+
+/**
+ * Resolve the skill-execution capability of one meta handshake. Servers that
+ * predate the field return undefined, selecting the legacy distribution.
+ */
+export function parseSkillExecutionSupport(meta: GsServerMeta): GsSkillExecutionSupport | undefined {
+  const capability = meta.skillExecution
+  if (capability === undefined || capability === null) return undefined
+  const advertised = Array.isArray(capability.types) ? capability.types : []
+  const types = advertised.filter((type): type is GsServerRuntimeType =>
+    (GS_SERVER_RUNTIME_TYPES as readonly string[]).includes(type as string))
+  return { supported: true, types }
+}
+
+/** Map one executable server runtime type to its settings-page execution kind. */
+function executionKindOf(runtimeType: GsServerRuntimeType): GsSkillExecutionKind {
+  return runtimeType === 'data-query' ? 'server-data-query' : 'server-mcp'
 }
 
 /**
@@ -181,42 +321,111 @@ export function stripSkillFrontmatter(text: string): string {
 export class ServerSkillProvider implements SkillProvider {
   readonly name = SERVER_SKILL_PROVIDER_NAME
   private lastReportKey: string | undefined
+  private readonly execution: GsSkillExecutionClient
+  /** In-memory remote definitions keyed by session, name, and definition revision. */
+  private readonly remoteDefinitions = new Map<string, SkillDefinition>()
+  private remoteSessionKey: string | undefined
 
   constructor(
     private readonly server: GsSkillServerFace,
     private readonly options: ServerSkillProviderOptions,
-    control: SkillProviderControl,
+    private readonly control: SkillProviderControl,
     private readonly sync?: GsSkillSyncTracker,
   ) {
+    this.execution = new GsSkillExecutionClient({
+      endpoint: () => server.endpoint(),
+      session: server,
+      ...(options.request === undefined ? {} : { request: options.request }),
+    })
     // Server-pushed skill switches change the effective catalog; invalidate so
     // consumers refetch instead of serving the cached revision.
     const unsubscribe = this.server.subscribeConfig(() => { control.invalidate() })
     control.signal.addEventListener('abort', unsubscribe, { once: true })
   }
 
+  /**
+   * Cache-isolation key of the current session: endpoint plus authenticated
+   * user. Remote definitions and the published catalog are only valid under
+   * the key that fetched them, so a late response from a previous account can
+   * never enter a new session.
+   */
+  private sessionKey(): string | undefined {
+    const userId = this.server.userId()
+    if (this.server.accessToken() === undefined || userId === undefined) return undefined
+    return `${this.server.endpoint()}#${String(userId)}`
+  }
+
+  /** Drop every remote definition cached under a different session key. */
+  private pruneRemoteState(sessionKey: string): void {
+    if (this.remoteSessionKey === sessionKey) return
+    this.remoteSessionKey = sessionKey
+    this.remoteDefinitions.clear()
+  }
+
+  /** Signed-out housekeeping: caches and the published catalog lose all remote entries. */
+  private resetRemoteState(): void {
+    this.remoteSessionKey = undefined
+    this.remoteDefinitions.clear()
+    this.options.catalog?.update(EMPTY_SERVER_SKILL_CATALOG)
+  }
+
   async list(options: SkillLookupOptions): Promise<readonly SkillCandidate[]> {
     // No session or an unreachable server yields an empty catalog; discovery
     // must never break host startup.
     if (this.server.accessToken() === undefined) {
+      this.resetRemoteState()
       this.sync?.update({ status: 'signed-out' })
       return []
     }
+    const sessionKey = this.sessionKey()
+    if (sessionKey === undefined) {
+      this.resetRemoteState()
+      this.sync?.update({ status: 'signed-out' })
+      return []
+    }
+    this.pruneRemoteState(sessionKey)
+
+    let meta: GsServerMeta
+    try {
+      meta = await this.execution.meta({ ...(options.signal === undefined ? {} : { signal: options.signal }) })
+    } catch (cause) {
+      return this.syncFailed(cause)
+    }
+    // A sign-out or account switch during the handshake discards the response.
+    if (this.sessionKey() !== sessionKey) return []
+    const support = parseSkillExecutionSupport(meta)
+    if (support === undefined) return this.listLegacy(options, sessionKey)
+    return this.listCatalog(options, sessionKey, support)
+  }
+
+  /** Record a sync failure, keeping the last good snapshot. */
+  private syncFailed(cause: unknown): readonly SkillCandidate[] {
+    this.options.logger?.warn(
+      `dsh-plugin-desktop: server skill sync failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+    )
+    // Keep the last good snapshot; only the status degrades.
+    this.sync?.update({ ...this.sync.snapshot(), status: 'error' })
+    return []
+  }
+
+  /**
+   * Legacy distribution for servers without the `skillExecution` capability:
+   * `GET /api/skills` delivers client and data-query bundles, remote types
+   * stay invisible, and everything materializes as a desktop-executed bundle.
+   */
+  private async listLegacy(
+    options: SkillLookupOptions,
+    sessionKey: string,
+  ): Promise<readonly SkillCandidate[]> {
     let response: GsSkillsResponse
     try {
       response = await this.authorized<GsSkillsResponse>('/api/skills', options.signal)
     } catch (cause) {
-      this.options.logger?.warn(
-        `dsh-plugin-desktop: server skill sync failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-      )
-      // Keep the last good snapshot; only the status degrades.
-      this.sync?.update({ ...this.sync.snapshot(), status: 'error' })
-      return []
+      return this.syncFailed(cause)
     }
+    if (this.sessionKey() !== sessionKey) return []
     const skills = Array.isArray(response?.skills) ? response.skills : []
     const controls = this.server.skillControls()
-    // The reserved key `SKILLs` is the master switch; it is not a valid skill
-    // name, so it can never collide with a delivered skill. `off` disables the
-    // whole skill feature and empties the effective catalog.
     const masterOff = controls?.SKILLs === 'off'
     const candidates: SkillCandidate[] = []
     const synced: GsSkillViewItem[] = []
@@ -225,46 +434,251 @@ export class ServerSkillProvider implements SkillProvider {
     for (const skill of skills) {
       if (skill.enabled === false || !isSkillName(skill.name)) continue
       if (masterOff) continue
-      // The switch table is subtractive: only an explicit per-skill `off`
-      // removes a delivered skill; unlisted and `on` entries pass through.
       if (controls?.[skill.name] === 'off') {
         switchedOff += 1
         continue
       }
-      candidates.push({
-        name: skill.name,
+      candidates.push(this.bundleCandidate(skill.name, skill.version, {
+        id: skill.id,
         description: typeof skill.description === 'string' ? skill.description : '',
-        invocation: { modelInvocable: true, userInvocable: true },
-        source: 'server',
-        provider: SERVER_SKILL_PROVIDER_NAME,
-        rank: SERVER_SKILL_RANK,
-        locator: { id: skill.id, name: skill.name, version: skill.version } satisfies ServerSkillLocator,
         metadata: {
           displayName: skill.displayName,
           version: skill.version,
           runtimeType: skill.runtimeType,
         },
-      })
+      }))
       synced.push({
         name: skill.name,
         displayName: skill.displayName,
         version: skill.version,
         description: typeof skill.description === 'string' ? skill.description : '',
+        runtimeType: skill.runtimeType,
       })
-      reports.push({ id: skill.id, name: skill.name, source: 'server' })
+      // The legacy catalog sends a numeric id; the report contract requires a string.
+      reports.push({ id: String(skill.id), name: skill.name, source: 'server' })
     }
+    this.options.catalog?.update({ supported: false, types: [], remotes: [] })
     this.reportInstalled(reports)
     this.sync?.update({
       status: 'ok',
       syncedAt: new Date().toISOString(),
       skills: synced,
+      execution: { supported: false, types: [] },
       masterOff,
       switchedOff,
     })
     return candidates
   }
 
+  /**
+   * Capability-aware distribution: `GET /api/v1/skills/catalog` is prefiltered
+   * by the server and carries every runtime type. `client` entries keep the
+   * bundle flow; executable remote types become virtual candidates; unknown
+   * types surface in the settings view as unavailable but never load.
+   */
+  private async listCatalog(
+    options: SkillLookupOptions,
+    sessionKey: string,
+    support: GsSkillExecutionSupport,
+  ): Promise<readonly SkillCandidate[]> {
+    let response: GsSkillCatalogResponse
+    try {
+      response = await this.execution.catalog({
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      })
+    } catch (cause) {
+      return this.syncFailed(cause)
+    }
+    if (this.sessionKey() !== sessionKey) return []
+    const skills = Array.isArray(response?.skills) ? response.skills : []
+    const controls = this.server.skillControls()
+    const masterOff = controls?.SKILLs === 'off'
+    const candidates: SkillCandidate[] = []
+    const synced: GsSkillViewItem[] = []
+    const reports: GsInstalledSkillReport[] = []
+    const remotes: GsServerSkillRemoteEntry[] = []
+    let switchedOff = 0
+    for (const skill of skills) {
+      if (!isSkillName(skill.name)) continue
+      if (masterOff) continue
+      // The switch table is subtractive: only an explicit per-skill `off`
+      // removes a delivered skill; unlisted and `on` entries pass through.
+      if (controls?.[skill.name] === 'off') {
+        switchedOff += 1
+        continue
+      }
+      const description = typeof skill.description === 'string' ? skill.description : ''
+      const view = {
+        name: skill.name,
+        displayName: skill.displayName,
+        version: skill.version,
+        description,
+        runtimeType: skill.runtimeType,
+      }
+      const remoteType = (GS_SERVER_RUNTIME_TYPES as readonly string[]).includes(skill.runtimeType)
+        && support.types.includes(skill.runtimeType as GsServerRuntimeType)
+        ? skill.runtimeType as GsServerRuntimeType
+        : undefined
+      if (skill.runtimeType === 'client') {
+        candidates.push(this.bundleCandidate(skill.name, skill.version, {
+          id: skill.name,
+          description,
+          metadata: {
+            displayName: skill.displayName,
+            version: skill.version,
+            runtimeType: skill.runtimeType,
+            execution: 'desktop',
+          },
+        }))
+        synced.push({ ...view, execution: 'desktop', available: true })
+        reports.push({ id: skill.name, name: skill.name, source: 'server' })
+      } else if (remoteType !== undefined) {
+        const revision = typeof skill.definitionRevision === 'string' ? skill.definitionRevision : ''
+        candidates.push({
+          name: skill.name,
+          description,
+          invocation: { modelInvocable: true, userInvocable: true },
+          source: 'server',
+          provider: SERVER_SKILL_PROVIDER_NAME,
+          rank: SERVER_SKILL_RANK,
+          locator: {
+            kind: 'remote',
+            name: skill.name,
+            version: skill.version,
+            runtimeType: remoteType,
+            revision,
+          } satisfies RemoteSkillLocator,
+          metadata: {
+            displayName: skill.displayName,
+            version: skill.version,
+            runtimeType: remoteType,
+            execution: 'server',
+            definitionRevision: revision,
+          },
+        })
+        synced.push({ ...view, execution: executionKindOf(remoteType), available: true })
+        remotes.push({ name: skill.name, runtimeType: remoteType, definitionRevision: revision })
+      } else {
+        // Unrecognized or not executable here: visible but never loadable,
+        // and never silently demoted to a local bundle.
+        synced.push({ ...view, available: false, unavailableReason: 'runtime-unsupported' })
+      }
+    }
+    // Server-executed skills have no local bundle, so they stay out of the
+    // file-installation report; the installed-set semantics are unchanged.
+    this.options.catalog?.update({ supported: true, types: support.types, remotes })
+    this.reportInstalled(reports)
+    this.sync?.update({
+      status: 'ok',
+      syncedAt: new Date().toISOString(),
+      skills: synced,
+      execution: support,
+      masterOff,
+      switchedOff,
+    })
+    return candidates
+  }
+
+  /** One bundle-backed candidate of the legacy or the capability-aware catalog. */
+  private bundleCandidate(
+    skillName: string,
+    version: string,
+    extra: { readonly id: string, readonly description: string, readonly metadata: Record<string, unknown> },
+  ): SkillCandidate {
+    return {
+      name: skillName,
+      description: extra.description,
+      invocation: { modelInvocable: true, userInvocable: true },
+      source: 'server',
+      provider: SERVER_SKILL_PROVIDER_NAME,
+      rank: SERVER_SKILL_RANK,
+      locator: { id: extra.id, name: skillName, version } satisfies ServerSkillLocator,
+      metadata: extra.metadata,
+    }
+  }
+
   async get(candidate: SkillCandidate, options: SkillLookupOptions): Promise<SkillDefinition | undefined> {
+    const remote = asRemoteLocator(candidate.locator)
+    if (remote !== undefined) return this.getRemote(candidate, remote, options)
+    return this.getBundle(candidate, options)
+  }
+
+  /** Load one server-executed skill's definition; no bundle ever lands on disk. */
+  private async getRemote(
+    candidate: SkillCandidate,
+    locator: RemoteSkillLocator,
+    options: SkillLookupOptions,
+  ): Promise<SkillDefinition | undefined> {
+    if (!isSkillName(locator.name)) return undefined
+    const sessionKey = this.sessionKey()
+    if (sessionKey === undefined) return undefined
+    this.pruneRemoteState(sessionKey)
+    const cacheKey = `${sessionKey}|${locator.name}@${locator.revision}`
+    const cached = this.remoteDefinitions.get(cacheKey)
+    if (cached !== undefined) return cached
+
+    let response
+    try {
+      response = await this.execution.definition(locator.name, {
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      })
+    } catch (cause) {
+      this.options.logger?.warn(
+        `dsh-plugin-desktop: server skill definition fetch failed for ${locator.name}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      )
+      if (this.sessionKey() === sessionKey) this.markRemoteUnavailable(locator.name, 'definition-error')
+      return undefined
+    }
+    // A sign-out or account switch during the fetch discards the response:
+    // nothing from the previous account enters the new session's cache.
+    if (this.sessionKey() !== sessionKey) return undefined
+    if (typeof response?.content !== 'string' || response.name !== locator.name) {
+      this.options.logger?.warn(`dsh-plugin-desktop: server skill definition refused for ${locator.name}`)
+      return undefined
+    }
+    if (response.runtimeType !== locator.runtimeType || response.definitionRevision !== locator.revision) {
+      // The definition moved under the catalog entry that drove this load;
+      // force a re-list so the next lookup uses the current revision.
+      this.options.logger?.warn(`dsh-plugin-desktop: server skill definition revision moved for ${locator.name}`)
+      this.control.invalidate()
+      return undefined
+    }
+    const definition: SkillDefinition = {
+      name: candidate.name,
+      description: candidate.description,
+      invocation: candidate.invocation,
+      source: candidate.source,
+      provider: candidate.provider,
+      content: stripSkillFrontmatter(response.content),
+      metadata: {
+        ...(candidate.metadata ?? {}),
+        execution: 'server',
+        runtimeType: locator.runtimeType,
+        definitionRevision: locator.revision,
+      },
+    }
+    if (this.remoteDefinitions.size >= MAX_REMOTE_DEFINITIONS) this.remoteDefinitions.clear()
+    this.remoteDefinitions.set(cacheKey, definition)
+    return definition
+  }
+
+  /** Mark one remote skill unavailable in the settings snapshot, if still listed. */
+  private markRemoteUnavailable(skillName: string, reason: string): void {
+    const state = this.sync?.snapshot()
+    if (state?.skills === undefined) return
+    this.sync?.update({
+      ...state,
+      skills: state.skills.map(item => item.name === skillName
+        ? { ...item, available: false, unavailableReason: reason }
+        : item),
+    })
+  }
+
+  /** Load one bundle-backed skill, materializing its files into the cache root. */
+  private async getBundle(
+    candidate: SkillCandidate,
+    options: SkillLookupOptions,
+  ): Promise<SkillDefinition | undefined> {
     const locator = candidate.locator as Partial<ServerSkillLocator> | undefined
     const skillName = locator?.name
     const version = locator?.version
@@ -414,8 +828,11 @@ export function apply(ctx: Context): void {
   const server = gsSkillServerFace(ctx.gsServer)
   const cacheRoot = join(ctx.gsServer.userDataDir, 'gs-skills')
   const sync = createGsSkillSyncTracker()
+  const catalog = createGsServerSkillCatalog()
   ctx.provide('gsSkillSync', sync)
-  ctx.skills.registerProvider(
-    control => new ServerSkillProvider(server, { cacheRoot, logger: ctx.logger }, control, sync),
-  )
+  ctx.provide('gsServerSkillCatalog', catalog)
+  ctx.skills.registerProvider((control) => {
+    catalog.bindInvalidate(() => { control.invalidate() })
+    return new ServerSkillProvider(server, { cacheRoot, logger: ctx.logger, catalog }, control, sync)
+  })
 }

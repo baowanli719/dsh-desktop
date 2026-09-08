@@ -1210,13 +1210,20 @@ describe('local skill ban', () => {
     // An enabled tool-skill row carrying a non-canonical package is an impostor.
     expect(() => assertEffectiveSkillRows([
       { id: 'tool-skill', name: 'third-party-tool-skill' },
-    ])).toThrow(/pinned tool-skill row/)
+    ])).toThrow(/pinned skill row/)
     expect(() => assertEffectiveSkillRows([{
       id: 'group',
       name: 'cordis:group',
       group: true,
       config: [{ name: '@deepseek-ai/dsh-tool-skill' }],
-    }])).toThrow(/pinned tool-skill row/)
+    }])).toThrow(/pinned skill row/)
+    // The server-skill bridge keeps its Desktop-owned canonical identity.
+    expect(() => assertEffectiveSkillRows([
+      { id: 'server-skill-tools', name: 'dsh-plugin-desktop/server-skill-tools' },
+    ])).not.toThrow()
+    expect(() => assertEffectiveSkillRows([
+      { id: 'server-skill-tools', name: 'third-party-skill-tools' },
+    ])).toThrow(/pinned skill row/)
   })
 
   it('sanitizes shipped presets without dropping their non-skill rows', () => {

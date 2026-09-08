@@ -432,15 +432,20 @@ export function apply(ctx: Context, config: Config): void {
       // otherwise serves the cached revision; a throw surfaces as a 500.
       const summaries = await skills.list({})
       const state = sync.snapshot()
-      const lite = new Map((state.skills ?? []).map(item => [item.name, item]))
       return {
         status: state.status,
         ...(state.syncedAt === undefined ? {} : { syncedAt: state.syncedAt }),
+        ...(state.execution === undefined ? {} : { execution: state.execution }),
         ...(state.masterOff === undefined ? {} : { masterOff: state.masterOff }),
         ...(state.switchedOff === undefined ? {} : { switchedOff: state.switchedOff }),
-        skills: summaries
-          .filter(summary => summary.provider === SERVER_SKILL_PROVIDER_NAME)
-          .map(summary => lite.get(summary.name) ?? { name: summary.name, description: summary.description }),
+        // The tracker projection is the effective catalog, including entries
+        // that never became candidates (unknown runtime types shown as
+        // unavailable); the registry intersection is only the legacy fallback.
+        skills: state.skills !== undefined
+          ? state.skills
+          : summaries
+            .filter(summary => summary.provider === SERVER_SKILL_PROVIDER_NAME)
+            .map(summary => ({ name: summary.name, description: summary.description })),
       }
     }
     ctx.effect(

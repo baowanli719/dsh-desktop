@@ -13,6 +13,19 @@ export interface DesktopSkillsSectionInjected {
   readonly gsBrand: DesktopGsBrandApi
 }
 
+/** Locale key of one execution-kind badge. */
+const EXECUTION_BADGE_KEYS = {
+  'desktop': 'skillsExecDesktop',
+  'server-data-query': 'skillsExecDataQuery',
+  'server-mcp': 'skillsExecServerMcp',
+} as const
+
+/** Locale key of one unavailability cause. */
+const UNAVAILABLE_REASON_KEYS: Record<string, 'skillsUnavailableRuntime' | 'skillsUnavailableDefinition'> = {
+  'runtime-unsupported': 'skillsUnavailableRuntime',
+  'definition-error': 'skillsUnavailableDefinition',
+}
+
 /** Renderer-composed props for the official skills section entry. */
 export type DesktopSkillsSectionProps =
   PropsRuntime<'settings.section'>
@@ -82,6 +95,9 @@ export function DesktopSkillsSection({
                 : t('skillsEmpty')}
           </p>
         )}
+        {skillsView !== undefined && skillsView.execution?.supported === false && (
+          <p className="dshDesktopSettingsHint">{t('skillsExecutionUnsupported')}</p>
+        )}
         {skillsView !== undefined && skillsView.skills.length > 0 && (
           <div className="dshDesktopSettingsList">
             {skillsView.skills.map(skill => (
@@ -90,8 +106,16 @@ export function DesktopSkillsSection({
                   <span className="dshDesktopSettingsChoiceTitle">
                     {skill.displayName ?? skill.name}
                     {skill.version !== undefined && <span className="dshDesktopSettingsBadge">{skill.version}</span>}
+                    {skill.execution !== undefined && (
+                      <span className="dshDesktopSettingsBadge">{t(EXECUTION_BADGE_KEYS[skill.execution])}</span>
+                    )}
                   </span>
                   <span className="dshDesktopSettingsChoiceBody">{skill.description}</span>
+                  {skill.available === false && (
+                    <span className="dshDesktopSettingsChoiceBody">
+                      {t(UNAVAILABLE_REASON_KEYS[skill.unavailableReason ?? ''] ?? 'skillsUnavailableRuntime')}
+                    </span>
+                  )}
                 </span>
               </div>
             ))}
