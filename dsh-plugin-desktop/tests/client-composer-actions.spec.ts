@@ -101,7 +101,10 @@ describe('attachComposerFiles', () => {
       addImages: vi.fn(() => true),
       insertReference: vi.fn(() => true),
       notify: vi.fn(),
-      state: { getSnapshot: () => ({ draft: '', draftRev: 1 }) },
+      state: {
+        getSnapshot: (): { draft: string, draftRev: number, occurrences: { offset: number, length: number }[] } =>
+          ({ draft: '', draftRev: 1, occurrences: [] }),
+      },
     }
     const actx = {} as ClientContext
     const conversation = {
@@ -165,5 +168,43 @@ describe('attachComposerFiles', () => {
       expect.objectContaining({ ref: '@"C:\\work dir\\my notes.txt"' }),
       expect.anything(),
     )
+  })
+
+  it('appends every selected document, computing each span in detect coordinates', () => {
+    const { ctx, input } = composerBench()
+    // Simulate the real editor: each applied chip expands to its clipboard
+    // mention in the draft, so the next snapshot's occurrences shrink the
+    // detect-projection end back below draft.length.
+    const editor = { draft: '', occurrences: [] as { offset: number, length: number }[] }
+    input.state.getSnapshot = () => ({ draft: editor.draft, draftRev: 1, occurrences: editor.occurrences })
+    const insertReference = vi.fn((reference: { clipboardText: string }, _span: unknown): boolean => {
+      editor.occurrences.push({ offset: editor.draft.length, length: reference.clipboardText.length })
+      editor.draft += reference.clipboardText
+      return true
+    })
+    input.insertReference = insertReference as unknown as typeof input.insertReference
+    ;(globalThis as Record<string, unknown>)[DESKTOP_FILE_PATH_BRIDGE] = {
+      getPathForFile: (file: File) => `C:\\work\\${file.name}`,
+    }
+    try {
+      attachComposerFiles(ctx, session.sessionId, [
+        new File(['x'], 'a.txt', { type: 'text/plain' }),
+        new File(['x'], 'b.txt', { type: 'text/plain' }),
+        new File(['x'], 'c.txt', { type: 'text/plain' }),
+      ])
+    } finally {
+      delete (globalThis as Record<string, unknown>)[DESKTOP_FILE_PATH_BRIDGE]
+    }
+
+    expect(insertReference).toHaveBeenCalledTimes(3)
+    const spans = insertReference.mock.calls.map(call => call[1])
+    // First insert lands at 0; every later chip folds to one detect char, so
+    // the ends are 1, 2 — never the clipboard-projection draft lengths.
+    expect(spans).toEqual([
+      { start: 0, end: 0, draftRev: 1 },
+      { start: 1, end: 1, draftRev: 1 },
+      { start: 2, end: 2, draftRev: 1 },
+    ])
+    expect(input.notify).not.toHaveBeenCalled()
   })
 })

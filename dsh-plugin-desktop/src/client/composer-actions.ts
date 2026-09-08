@@ -93,7 +93,14 @@ interface DraftConversation {
       addImages(ids: readonly DraftAttachmentId[]): boolean
       insertReference(ref: ReferenceInsert, span: TokenSpan): boolean
       notify(level: 'info' | 'error', text: string): void
-      readonly state: { getSnapshot(): { readonly draft: string; readonly draftRev: number } }
+      readonly state: {
+        getSnapshot(): {
+          readonly draft: string
+          readonly draftRev: number
+          /** Chip view in clipboard coordinates; only the lengths are needed to fold back to detect coordinates. */
+          readonly occurrences: readonly { readonly length: number }[]
+        }
+      }
     }
   }
   createDraftImages(files: readonly File[]): readonly ComposerAttachment[]
@@ -259,7 +266,15 @@ function insertComposerFileReference(input: ComposerInput, file: File): void {
     return
   }
   const snapshot = input.state.getSnapshot()
-  const at = snapshot.draft.length
+  // insertReference spans are in detect coordinates (every chip counts as
+  // one U+FFFC), while snapshot.draft is the clipboard projection with chips
+  // expanded to their mention text. Derive the document end in detect
+  // coordinates by folding each occurrence back to its single detect char,
+  // otherwise every insertion after the first chip overshoots and fails.
+  const at = snapshot.occurrences.reduce(
+    (length, occurrence) => length - (occurrence.length - 1),
+    snapshot.draft.length,
+  )
   const applied = input.insertReference({
     source: 'reference',
     ref: mention,
