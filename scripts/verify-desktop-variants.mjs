@@ -7,6 +7,7 @@ const betaRoot = join(root, 'dsh-plugin-desktop-beta', 'src')
 const allowedDifferences = new Set([
   // The stable package is the gs-worker office Agent; Beta remains the stock
   // upstream DSH Desktop product. These files implement that product boundary.
+  'app-icon.ts',
   'brand.ts',
   'client/DesktopAboutSection.tsx',
   'client/DesktopAccountMenu.tsx',
@@ -38,6 +39,7 @@ const allowedDifferences = new Set([
   'login-contract.ts',
   'login-copy.ts',
   'login-window.ts',
+  'local-window-policy.ts',
   'native-dialog-copy.ts',
   'native-ui/desktop-dialog.html',
   'native-ui/login.html',
@@ -69,8 +71,11 @@ const allowedDifferences = new Set([
   'tray-locale.ts',
   'update-download.ts',
   'update-lifecycle.ts',
+  'server-app-update.ts',
+  'server-updates.ts',
   'window-chrome.ts',
   'window-options.ts',
+  'windows-pwsh-sandbox.ts',
   'windows-volume-diagnostics.ts',
   'workspace-admission.ts',
   'agent-preset-compat.ts',

@@ -122,6 +122,31 @@ provider 同时维护一份同步快照(`gsSkillSync` tracker):记录最近一�
 2. **客户端日志上传**:`src/server/gs-log-exporter.ts` 是一个与本地 `FileExporter` 并存的 Cordis exporter,把渲染后经 `mask-secrets` 脱敏的消息缓冲成批,`POST /api/logs/client`(满 50 条或每 10 秒触发;每批 ≤ 200 条且 ≤ 192 KB,队列上限 2000 条,溢出丢最旧)。上传严格尽力而为:失败批次直接丢弃不重试,进程退出前给最后一次 flush 2 秒宽限;上传器自身的诊断只写本地文件日志,避免经 `ctx.logger` 递归。服务端写入 `client_logs` 表,管理侧经 `GET /api/admin/logs/client` 查看。
 3. **本地文件日志不变**:仍写 `userData/logs/dsh-YYYY-MM-DD.log`(及 `.error.log`),10 MiB 轮转、保留七天、总量 200 MiB 上限,`dsh-desktop.logLevel` 控制详细程度。
 
+## 应用更新下发
+
+ClientConfig 的 `appUpdate` 字段(`GsAppUpdateConfig`,`src/server/gs-contract.ts`)由服务端在登录、刷新与 `GET /api/client-config` 中下发,承载一条新版本通知:`version`(纯数字分段版本)、可选 `notes`(逐条更新说明)、`downloads`(按平台划分的安装包直链:`windowsX64` / `macArm` / `macIntel`)、可选 `availableFrom`(开放下载时间)与可选 `downloadWindow`(自动下载时段)。`null` 或缺失表示不下发更新提示。
+
+客户端消费链:`desktop-server-updates` 插件(`dsh-plugin-desktop/src/server-updates.ts`,在 `cordis.patch.yml` 中挂载,`inject = ['desktopRuntime', 'gsServer']`)订阅 `ctx.gsServer.config` 的推送快照,并每 5 分钟(`pullIntervalMs`)主动拉一次 `/api/client-config`——启动后 15 秒首拉(`initialPullDelayMs`),给 `restoreSession()` 的推送留出先到的时间;拉取失败(未登录/离线)完全静默。每次快照到达都经 `src/server-app-update.ts` 处理:`parseServerAppUpdate` 对线上 JSON 做防御性解析(版本必须是规范化纯数字 SemVer、直链必须是 http(s) 且无内嵌凭据、notes/availableFrom/downloadWindow 形状校验,任何字段非法整体视为无更新,宁可不提示不可崩溃),`evaluateServerAppUpdate` 再做评估:
+
+- `appUpdate` 为空、版本不高于当前、或当前平台/arch 无下载地址 → 不动作;
+- `now < availableFrom` → 只提示(notify-only),对话框没有下载按钮,仅说明何时开放下载;
+- 否则弹原生对话框(标题 + notes 逐条正文,主按钮为"升级"),用户点"升级"后全自动完成升级,点"稍后"本次运行内不再重复提示(内存去重,下次启动重新提示)。
+
+下载与安装纪律:安装包从 `downloads` 直链直接 GET——无需登录、不带 `X-DSH-*` 头、不校验回显头(gsclaw-server 静态目录不回显);写盘复用社区通道同一套防线:1 GiB 大小上限、PE/DMG 魔数校验、临时文件 + rename 原子完工(`downloadDesktopUpdateFromUrl`,`src/update-download.ts`)。确认"升级"后不再有任何交互:不弹保存对话框,安装包固定下载到 userData 下的 `updates/` 管理目录(0700 私有目录,`desktopUpdateManagedDirectory`;默认文件名取直链 basename,非法字符或扩展名不符时回退到生成的 `gs-worker-<version>-<platform>.<ext>`),下载开始时发一条系统通知。下载完成后:Windows 不弹"重启并安装"确认,直接以 NSIS `/S` 静默模式拉起安装器并退出应用(保留 `--updated --force-run`,装完自动启动新版);macOS 无法静默安装 DMG,自动打开 DMG 并弹说明对话框,由用户手工拖装。下载失败(网络/校验/取消)不弹窗,只记日志并发一条失败系统通知。服务端通道下载的 artifact 记录带 `managed: true` 标记(`recordDesktopUpdateArtifact`),升级后的下次启动由 `performUpdateArtifactCleanup` 静默删除残留安装包;社区通道用户自选路径下载的 artifact 不带该标记,仍按原行为弹"删除安装包?"询问。`downloadWindow` 不实现自动下载:本客户端的下载触发点就是"升级"按钮这一次确认,服务端契约明确手动下载不受时段限制,因此该字段只做形状校验、不参与评估。适配器未注入(`serverUpdates` 缺失)或当前构建不可下载(`canDownload === false`)时只写一条日志,不弹框;登出清空快照后不动作。
+
+### 发布新版本的操作要求
+
+一次完整发布按以下顺序执行,每一步都对应一条可核验的硬要求:
+
+1. **版本号**:`dsh-plugin-desktop/package.json` 的 `version` 升一级,并同步钉死它的断言——`tests/package.spec.ts` 的应用身份断言、`tests/electron-runtime.spec.ts` 的 `productVersion` / `appVersion` / `currentVersion` 三处,以及 README 中英文两版的版本引用与 `README.i18n.yaml` 的 blob 哈希记录。版本号 bump 与功能改动分开提交。
+2. **打包**:`corepack yarn dist:win`(先跑 Windows 可运行的 gate,全绿才出包)。electron-builder 要从 GitHub 拉 Electron 与 NSIS 组件,网络受限时在命令前加 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 与 `ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`。产物为 `dsh-plugin-desktop/dist/gs-worker-<version>-x64-Setup.exe`,本地记录 sha256 备查;本地构建不做 Authenticode 签名(签名是独立的人工发布步骤,未签名包会被 SmartScreen 提示 Unknown publisher)。
+3. **托管**:安装包必须放在客户端可直连的 http(s) 直链上——无需登录、GET 返回 200、支持 Range。当前生产约定是 CorAliyun(8.138.102.170)nginx 443 站点的 `/downloads/` 位置(`location ^~ /downloads/` 映射 `/opt/gs-downloads/`,只读、禁非 GET/HEAD、带 `Content-Disposition: attachment`;改动前的站点配置备份在服务器 `/etc/nginx/litellm.bak-*`),scp 上传后必须核对服务端 sha256 与本地一致。另一条路是 gsclaw-server 自带的 `PUT /api/admin/releases/packages/:platform/:filename`(文件落服务端 `downloads/` 目录,直链形如 `/gsworker/downloads/<filename>`),但该部署前置 nginx 请求体上限会 413 大安装包,需要先把 `client_max_body_size` 调到 2048m 并 reload。
+4. **登记**:`POST <endpoint>/api/admin/releases/publish`,`Authorization: Bearer <RELEASE_API_TOKEN>`(服务端 `.env` 配置,推荐)或管理员账号 JWT(`POST /api/auth/login` 需先过图形验证码)。body 为 `{"appUpdate": {...}}`,字段要求:`version` 只接受纯数字分段 SemVer(无 prerelease/build),且**严格高于**客户端当前版本才会触发提醒(相等或更低客户端不动作);`downloads` 至少一个平台、值必须是完整直链;`availableFrom` 之前客户端只提示不提供下载;`downloadWindow` 当前客户端不消费,可省略。发布接口只在完整校验通过后才写入,上传或发布失败都不会改变当前已登记版本。
+5. **核验**:`GET <endpoint>/api/admin/releases/current` 返回本次登记内容;`curl -I` 下载直链返回 200 且带 `Accept-Ranges: bytes`;已登录客户端在 5 分钟内(定时拉取)或重启/重新登录后应弹出升级提醒。
+6. **测试技巧**:没有更高版本的包也想触发提醒时,可以临时登记一个更高版本号、直链指向同一个安装包,测完把登记改回真实版本。注意测试残留:登记版本高于已装二进制时,userData `updates/` 里的 managed artifact 不满足"安装后版本 ≥ artifact 版本"的清理条件,会一直滞留并反复提醒,测试结束要手工删除该目录内容并把登记改回。
+
+两条硬性约束:**appUpdate 只适用于 stable 通道**——beta 的 `-beta.N` 版本号不满足服务端 version 字段的纯数字要求,beta 客户端的升级提醒仍走社区通道(`update-checker.ts`);**登记版本必须等于安装包真实版本**——长期虚高会让 managed artifact 永远达不到清理条件,且客户端每次启动都重复提醒。
+
 ## 配置与运维
 
 端点解析优先级(`src/server/gs-endpoint.ts`,每次请求时读取,覆盖即时生效):
@@ -182,5 +207,6 @@ NSIS 使用 assisted 安装器(`oneClick: false`、`perMachine: false`、`allowE
 - [服务端技能执行客户端](../dsh-plugin-desktop/src/server/gs-skill-execution.ts)
 - [服务端技能桥接工具](../dsh-plugin-desktop/src/server-skill-tools.ts)
 - [客户端日志上传](../dsh-plugin-desktop/src/server/gs-log-exporter.ts)
+- [服务端应用更新评估](../dsh-plugin-desktop/src/server-app-update.ts)
 - [profile 组成闸门与断言](../dsh-plugin-desktop/src/profile.ts)
 - [桌面架构](architecture.md)

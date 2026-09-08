@@ -1,6 +1,6 @@
 /** Fail-loud verification of the runtime entries sealed into Electron's app.asar. */
 
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
@@ -60,6 +60,7 @@ export const REQUIRED_PACKAGED_RUNTIME_ENTRIES = [
   'lib/update-checker.js',
   'lib/update-download.js',
   'lib/updates.js',
+  'lib/server-updates.js',
   'lib/windows-acl-runner.js',
   ...REQUIRED_DSH_CLI_RUNTIME_ENTRIES,
   'node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js',
@@ -93,6 +94,7 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'lib/terminal.js',
   'lib/update-download.js',
   'lib/updates.js',
+  'lib/server-updates.js',
   'lib/windows-pwsh-sandbox.js',
   'node_modules/@deepseek-ai/dsh/package.json',
   'node_modules/@deepseek-ai/dsh-agent-presets/package.json',
@@ -132,12 +134,31 @@ export const REQUIRED_UNPACKED_PACKAGE_SPECIFIERS = [
   'dsh-plugin-desktop/diagnostics',
   'dsh-plugin-desktop/notifications',
   'dsh-plugin-desktop/updates',
+  'dsh-plugin-desktop/server-updates',
   'dsh-plugin-desktop/windows-pwsh-sandbox',
   'dsh-plugin-desktop/package.json',
   '@deepseek-ai/dsh-base/package.json',
   '@deepseek-ai/schemastery/package.json',
   '@deepseek-ai/dsh-web-app/package.json',
 ] as const
+
+/**
+ * External requires the packaged browser client bundle may retain.
+ *
+ * Mirrors the tsdown client-segment `external` list; the runtime module loader
+ * provides exactly these specifiers, so anything else must be inlined through
+ * `noExternal` instead of surviving as a bare `require`.
+ */
+export const ALLOWED_PACKAGED_CLIENT_EXTERNALS = Object.freeze([
+  'react',
+  'react/jsx-runtime',
+  'react-dom',
+  'react-dom/client',
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-ui-slots',
+  '@deepseek-ai/dsh-client-ui-renderer',
+  '@deepseek-ai/dsh-client-ui-primitives',
+])
 
 /** Injectable archive listing seam used by focused tests. */
 export type ArchiveLister = (archivePath: string, options: { isPack: boolean }) => readonly string[]
@@ -334,6 +355,52 @@ export function verifyUnpackedArchiveMirror(
   }
 }
 
+/** Injectable text reader seam used to verify the packaged client bundle. */
+export type PackagedTextReader = (filename: string) => string
+
+const PACKAGED_CLIENT_REQUIRE_PATTERN = /require\(\s*(["'])([^"']+)\1\s*\)/g
+
+/**
+ * Reject external requires the packaged browser client bundle must not keep.
+ *
+ * The runtime module loader provides only ALLOWED_PACKAGED_CLIENT_EXTERNALS;
+ * any other bare `require` in lib/client.js means a dependency escaped tsdown
+ * `noExternal` inlining and the renderer would stall at boot.
+ * @param unpackedRoot - absolute path to app.asar.unpacked.
+ * @param readText - bundle text reader, injectable for tests.
+ * @returns Nothing; failure rejects the package before signing.
+ */
+export function verifyPackagedClientExternals(
+  unpackedRoot: string,
+  readText: PackagedTextReader = filename => readFileSync(filename, 'utf8'),
+): void {
+  const bundlePath = join(unpackedRoot, 'lib', 'client.js')
+  let bundle: string
+  try {
+    bundle = readText(bundlePath)
+  } catch (cause) {
+    throw new Error(
+      `dsh-plugin-desktop: packaged runtime at ${unpackedRoot} is missing the browser client bundle lib/client.js`,
+      { cause },
+    )
+  }
+  const unknown: string[] = []
+  for (const match of bundle.matchAll(PACKAGED_CLIENT_REQUIRE_PATTERN)) {
+    const specifier = match[2]
+    if (specifier !== undefined
+      && !ALLOWED_PACKAGED_CLIENT_EXTERNALS.includes(specifier)
+      && !unknown.includes(specifier)) {
+      unknown.push(specifier)
+    }
+  }
+  if (unknown.length > 0) {
+    throw new Error(
+      `dsh-plugin-desktop: packaged browser client bundle at ${bundlePath} keeps external requires outside the allowlist: ${unknown.join(', ')}. `
+      + 'Client bundle externals drift — inline the package in tsdown noExternal or extend the allowlist deliberately.',
+    )
+  }
+}
+
 /**
  * Verify package exports resolve through the physical tree instead of the build workspace.
  * @param unpackedRoot - absolute path to app.asar.unpacked.
@@ -375,6 +442,7 @@ export function verifyUnpackedPackageResolution(
  * @param list - ASAR listing implementation.
  * @param exists - physical-file probe for the unpacked CLI dependency tree.
  * @param resolvePackage - package resolver anchored at the physical root manifest.
+ * @param readText - client bundle text reader for the externals drift guard.
  * @returns Nothing; failure rejects the package before signing.
  */
 export function verifyPackagedRuntime(
@@ -382,6 +450,7 @@ export function verifyPackagedRuntime(
   list: ArchiveLister = listPackage,
   exists: FileProbe = existsSync,
   resolvePackage?: PackageResolver,
+  readText: PackagedTextReader = filename => readFileSync(filename, 'utf8'),
 ): void {
   const archiveEntries = verifyPackagedAsar(resolvePackagedAsarPath(context), list)
   const unpackedRoot = resolvePackagedUnpackedRoot(context)
@@ -406,6 +475,7 @@ export function verifyPackagedRuntime(
     }
   }
   verifyUnpackedArchiveMirror(archiveEntries, unpackedRoot, exists)
+  verifyPackagedClientExternals(unpackedRoot, readText)
   verifyUnpackedPackageResolution(unpackedRoot, resolvePackage)
 }
 

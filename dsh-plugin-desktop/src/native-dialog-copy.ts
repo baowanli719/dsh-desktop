@@ -20,6 +20,11 @@ export interface DesktopNativeCopy {
   readonly installStableAlongsideBeta: string
   readonly download: string
   readonly later: string
+  readonly serverUpdateAvailableFrom: (availableFrom: string) => string
+  readonly serverUpdatePending: string
+  readonly upgrade: string
+  readonly serverUpdateDownloading: (version: string) => string
+  readonly serverUpdateDownloadFailed: (version: string) => string
   readonly updateCheckFailedTitle: string
   readonly updateCheckFailedMessage: string
   readonly tryAgainLater: string
@@ -88,6 +93,11 @@ const COPY: Record<DesktopLocale, DesktopNativeCopy> = {
     installStableAlongsideBeta: 'Install the stable edition alongside DSH Desktop Beta? The Beta app will remain installed.',
     download: 'Download',
     later: 'Later',
+    serverUpdateAvailableFrom: availableFrom => `This update can be downloaded starting ${availableFrom}.`,
+    serverUpdatePending: 'This update is not yet available for download.',
+    upgrade: 'Upgrade',
+    serverUpdateDownloading: version => `Downloading {brand} ${version}. It will be installed automatically when the download completes.`,
+    serverUpdateDownloadFailed: version => `{brand} ${version} could not be downloaded. Please try again later.`,
     updateCheckFailedTitle: 'Unable to Check for Updates',
     updateCheckFailedMessage: '{brand} could not check for updates.',
     tryAgainLater: 'Please try again later.',
@@ -149,6 +159,11 @@ const COPY: Record<DesktopLocale, DesktopNativeCopy> = {
     installStableAlongsideBeta: '是否同时安装稳定版？DSH Desktop Beta 将继续保留。',
     download: '下载',
     later: '稍后',
+    serverUpdateAvailableFrom: availableFrom => `该版本将于 ${availableFrom} 开放下载。`,
+    serverUpdatePending: '该版本暂未开放下载。',
+    upgrade: '升级',
+    serverUpdateDownloading: version => `正在下载{brand} ${version}，下载完成后将自动安装并重启。`,
+    serverUpdateDownloadFailed: version => `{brand} ${version} 下载失败，请稍后重试。`,
     updateCheckFailedTitle: '无法检查更新',
     updateCheckFailedMessage: '{brand} 无法检查更新。',
     tryAgainLater: '请稍后重试。',

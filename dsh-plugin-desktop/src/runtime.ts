@@ -113,6 +113,8 @@ export interface DesktopUpdateAdapter {
   readonly installationId?: DesktopInstallationId
   /** Request adapter backed by Electron's native network session. */
   readonly request: UpdateRequest
+  /** Optional native face for gsclaw-server-pushed application updates. */
+  readonly serverUpdates?: DesktopServerUpdateAdapter
   /** Ask whether one strictly newer version may be downloaded. */
   confirmDownload(version: string, channel?: DesktopReleaseChannel): Promise<boolean>
   /** Present the outcome of a user-triggered version check. */
@@ -121,6 +123,26 @@ export interface DesktopUpdateAdapter {
   downloadAndOpen(version: string, signal: AbortSignal, channel?: DesktopReleaseChannel): Promise<void>
   /** Present a native status notification without blocking the Host tree. */
   notify(notification: DesktopNotification): void
+}
+
+/** Native dialogs and installer handoff for gsclaw-server-pushed application updates. */
+export interface DesktopServerUpdateAdapter {
+  /**
+   * Present the server-pushed update notice natively.
+   * @param version - strictly newer server-published version.
+   * @param notes - server-delivered release notes, possibly empty.
+   * @param mode - `notify-only` offers no download button before `availableFrom`.
+   * @param availableFrom - ISO timestamp gating downloads, present in `notify-only` mode.
+   * @returns whether the user chose to download immediately; meaningless in `notify-only` mode.
+   */
+  promptUpdate(
+    version: string,
+    notes: readonly string[],
+    mode: 'available' | 'notify-only',
+    availableFrom?: string,
+  ): Promise<boolean>
+  /** Download one confirmed server-linked installer and hand it to the platform installer. */
+  downloadAndOpen(url: string, version: string, signal: AbortSignal): Promise<void>
 }
 
 /** Profile identity needed to open the packaged DSH command environment. */
