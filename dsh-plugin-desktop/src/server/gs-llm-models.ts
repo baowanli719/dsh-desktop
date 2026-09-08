@@ -43,6 +43,16 @@ export const GS_LLM_PROXY_CREDENTIAL_REF = 'DSH_DESKTOP_LLM_PROXY_TOKEN'
 export const GS_LLM_PI_AI_SETTINGS_NAMESPACE = 'llm-pi-ai'
 export const GS_LLM_DEEPSEEK_SETTINGS_NAMESPACE = 'llm-deepseek'
 export const GS_AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE = 'agent-default-model'
+export const GS_VISION_ROUTER_SETTINGS_NAMESPACE = 'vision-router'
+
+/**
+ * Server-side vision model the desktop vision bridges (Vision Router backend,
+ * the vision MCP child) reach through the loopback proxy. The gsclaw-server
+ * LLM gateway proxies it via its visionModel allowance even though it never
+ * appears in the user-selectable model list.
+ */
+export const GS_VISION_PROVIDER_ID = 'gs-cloud'
+export const GS_VISION_MODEL_ID = 'qwen36-35b'
 
 const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024
 const DOCUMENT_FILE_MODE = 0o600
@@ -76,6 +86,26 @@ export interface GsLlmDefaultModel {
   readonly model: string
 }
 
+/** One OpenAI-compatible vision backend row consumed by the Vision Router plugin. */
+export interface GsVisionRouterHttpProvider {
+  readonly name: string
+  readonly baseURL: string
+  readonly model: string
+  readonly apiKeyEnv: string
+  readonly maxTokens: number
+}
+
+/**
+ * Mirrored `vision-router:` settings section: the loopback vision backend,
+ * with the anonymous external fallback chain disabled. Owned outright by the
+ * mirror, so manual edits in the Vision Router settings card are overwritten
+ * on the next boot, matching the server-managed model plane.
+ */
+export interface GsVisionRouterSection {
+  readonly httpProviders: readonly GsVisionRouterHttpProvider[]
+  readonly freeFallback: false
+}
+
 /** Inputs for {@link planGsLlmModelProfile}. */
 export interface GsLlmModelPlanInput {
   /** Server ClientConfig `models` section; null or empty keeps upstream defaults. */
@@ -92,8 +122,31 @@ export interface GsLlmModelPlan {
   readonly providers?: Record<string, GsLlmProviderProfile>
   /** Default selection resolved from `defaultPrimary` or the first supplied model. */
   readonly defaultModel?: GsLlmDefaultModel
+  /** `vision-router:` section pointing the vision backend at the loopback proxy. */
+  readonly visionRouter: GsVisionRouterSection
   /** Human-readable diagnostics for skipped or unresolvable server entries. */
   readonly warnings: readonly string[]
+}
+
+/**
+ * Build the vision-backend section for the Vision Router plugin. It only
+ * needs the loopback origin: the server gateway proxies the vision model via
+ * its visionModel allowance, independent of the user-selectable model list.
+ */
+export function planGsVisionRouterSection(
+  proxyOrigin: string,
+  credentialRef: string = GS_LLM_PROXY_CREDENTIAL_REF,
+): GsVisionRouterSection {
+  return {
+    httpProviders: [{
+      name: 'gsclaw-vision',
+      baseURL: `${proxyOrigin}/v1/${GS_VISION_PROVIDER_ID}`,
+      model: GS_VISION_MODEL_ID,
+      apiKeyEnv: credentialRef,
+      maxTokens: 4096,
+    }],
+    freeFallback: false,
+  }
 }
 
 /**
@@ -105,11 +158,12 @@ export interface GsLlmModelPlan {
 export function planGsLlmModelProfile(input: GsLlmModelPlanInput): GsLlmModelPlan {
   const warnings: string[] = []
   const source = input.models
+  const credentialRef = input.credentialRef ?? GS_LLM_PROXY_CREDENTIAL_REF
+  const visionRouter = planGsVisionRouterSection(input.proxyOrigin, credentialRef)
   if (source === null || source === undefined) {
     warnings.push('server ClientConfig carries no models section; keeping the upstream default model')
-    return { warnings }
+    return { visionRouter, warnings }
   }
-  const credentialRef = input.credentialRef ?? GS_LLM_PROXY_CREDENTIAL_REF
   const providers: Record<string, GsLlmProviderProfile> = {}
   for (const providerId of Object.keys(source.providers).sort()) {
     const entry = source.providers[providerId]
@@ -149,7 +203,7 @@ export function planGsLlmModelProfile(input: GsLlmModelPlanInput): GsLlmModelPla
   const providerIds = Object.keys(providers)
   if (providerIds.length === 0) {
     warnings.push('server ClientConfig supplied no usable model providers; keeping the upstream default model')
-    return { warnings }
+    return { visionRouter, warnings }
   }
 
   let defaultModel: GsLlmDefaultModel | undefined
@@ -167,7 +221,7 @@ export function planGsLlmModelProfile(input: GsLlmModelPlanInput): GsLlmModelPla
   }
   const firstProvider = providerIds[0]!
   defaultModel ??= { provider: firstProvider, model: providers[firstProvider]!.models[0]!.id }
-  return { providers, defaultModel, warnings }
+  return { providers, defaultModel, visionRouter, warnings }
 }
 
 /**
@@ -299,12 +353,13 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value) ?? 'null'
 }
 
-/** The three mirror-owned sections of one parsed document, as a stable string. */
+/** The mirror-owned sections of one parsed document, as a stable string. */
 function ownedSections(root: Record<string, unknown>): string {
   return stableStringify([
     root[GS_LLM_PI_AI_SETTINGS_NAMESPACE],
     root[GS_LLM_DEEPSEEK_SETTINGS_NAMESPACE],
     root[GS_AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE],
+    root[GS_VISION_ROUTER_SETTINGS_NAMESPACE],
   ])
 }
 
@@ -346,6 +401,7 @@ export async function mirrorGsLlmModelSettings(
     } else {
       document.setIn([GS_AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE], defaultSection)
     }
+    document.setIn([GS_VISION_ROUTER_SETTINGS_NAMESPACE], plan.visionRouter)
     if (document.contents === null) return false
     if (ownedSections(document.toJS() ?? {}) === before && loaded.existed) return false
     output = document.toString()
@@ -356,6 +412,7 @@ export async function mirrorGsLlmModelSettings(
     delete root[GS_LLM_DEEPSEEK_SETTINGS_NAMESPACE]
     if (defaultSection === undefined) delete root[GS_AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE]
     else root[GS_AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE] = defaultSection
+    root[GS_VISION_ROUTER_SETTINGS_NAMESPACE] = plan.visionRouter
     if (ownedSections(root) === before) return false
     output = `${JSON.stringify(root, undefined, 2)}\n`
   }

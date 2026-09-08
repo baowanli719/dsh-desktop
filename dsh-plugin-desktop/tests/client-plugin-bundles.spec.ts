@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import semver from 'semver'
 import { describe, expect, it } from 'vitest'
@@ -17,6 +18,7 @@ interface ClientRegistration {
 const clientPlugins = [
   'dsh-better-sidebar',
   '@huanlin/dsh-plugin-better-sidebar-plugin-office',
+  'dsh-vision-router',
 ] as const
 
 function packageJson(name: string): Record<string, unknown> {
@@ -65,5 +67,17 @@ describe('stable Renderer client plugin bundles', () => {
   it('pins the compatible sidebar/Office pair used by Harness 0.1.2-rc.1', () => {
     expect(packageJson('dsh-better-sidebar').version).toBe('0.17.1')
     expect(packageJson('@huanlin/dsh-plugin-better-sidebar-plugin-office').version).toBe('0.2.0')
+  })
+
+  it('pins the yarn-patched vision router build', () => {
+    expect(packageJson('dsh-vision-router').version).toBe('2.1.3')
+    // patches/dsh-vision-router@2.1.3.patch: the two product gates our
+    // cordis row relies on (deepseekTakeover / updateCheck).
+    const source = readFileSync(
+      join(dirname(require.resolve('dsh-vision-router/package.json')), 'index.js'),
+      'utf8',
+    )
+    expect(source).toContain('deepseekTakeover')
+    expect(source).toContain('updateCheck')
   })
 })

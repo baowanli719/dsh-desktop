@@ -36,6 +36,23 @@
     # sub-agents). No config key: the plugin's own defaults apply.
     - id: better-sidebar
       name: 'dsh-better-sidebar'
+    # Community vision bridge: pasted images become ordinary vision-tool turns
+    # through the server-side vision model. The row id matches the plugin's own
+    # bundle patch so a manual `dsh plugin add` cannot double-mount it. The
+    # vision backend (loopback proxy origin) is mirrored per boot into the
+    # `vision-router:` settings namespace by mirrorGsLlmModelSettings — do not
+    # put httpProviders here, the port changes every launch. freeFallback keeps
+    # images off the anonymous external OVH chain; deepseekTakeover/updateCheck
+    # are product gates provided by patches/dsh-vision-router@2.1.3.patch.
+    # downscaleMaxPixels keeps base64 bodies inside both 4 MB proxy caps.
+    - id: vision-router
+      name: 'dsh-vision-router'
+      config:
+        progressiveTools: false
+        freeFallback: false
+        deepseekTakeover: false
+        updateCheck: false
+        downscaleMaxPixels: 2000000
     # Office-suite preview viewers (.docx/.xlsx/.pptx) for the better-sidebar
     # editor; the client-only plugin registers them through the sidebar's
     # file-viewer service. The row id matches the plugin's own bundle patch so

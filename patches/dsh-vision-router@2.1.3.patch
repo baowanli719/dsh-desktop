@@ -1,0 +1,39 @@
+diff --git a/index.js b/index.js
+index c2b2d56a5190dc6a3c20695535871481bb67e132..23a6788335361519bbf232ba55665fc7c4acae91 100644
+--- a/index.js
++++ b/index.js
+@@ -290,6 +290,10 @@ export const Config = z.object({
+   // 默认关闭（issue #34 明确 opt-in）：关闭时官方 deepseek-official 路由
+   // 原样保留；唯一例外见 apply 里的 keep-alive 兜底（官方行被禁用时）。
+   stealth: z.boolean().default(false),
++  // gs-worker desktop: product switches to disable the keep-alive takeover and
++  // the boot-time update check; defaults preserve upstream behavior.
++  deepseekTakeover: z.boolean().default(true),
++  updateCheck: z.boolean().default(true),
+   textProvider: z
+     .object({
+       provider: z.string().default('deepseek-official'),
+@@ -3356,6 +3360,7 @@ export function apply(ctx, config = {}, runtime = {}) {
+           : undefined,
+     },
+   })
++  if (current().updateCheck !== false) {
+   void updateChecker.check(false).then((result) => {
+     if (result && result.ok === true && result.updateAvailable === true) {
+       ctx.logger?.info(
+@@ -3365,6 +3370,7 @@ export function apply(ctx, config = {}, runtime = {}) {
+       )
+     }
+   })
++  }
+ 
+   // ── stealth takeover: serve `deepseek-official` ourselves ────────────────
+   //
+@@ -3462,6 +3468,7 @@ export function apply(ctx, config = {}, runtime = {}) {
+     }
+   }
+   const maybeTakeover = () => {
++    if (current().deepseekTakeover === false) return
+     if (!takeoverSettled || stealthActive || takeoverAttempted) return
+     if (adapterAvailable(ctx.llm, 'deepseek-official')) {
+       if (stealthEnabled) {
