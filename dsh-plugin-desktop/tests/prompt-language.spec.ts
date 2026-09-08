@@ -61,22 +61,32 @@ describe('desktop-prompt-language plugin', () => {
       source: { kind: 'plugin', plugin: language.LANGUAGE_REMINDER_SOURCE },
       content: [{ type: 'text', text: language.LANGUAGE_REMINDER }],
     })
+    const reminderLines = language.LANGUAGE_REMINDER.split('\n')
+    expect(reminderLines).toHaveLength(2)
+    expect(reminderLines[0]).toContain('progress between tool calls')
+    expect(reminderLines[1]).toContain('工具调用间的可见进度')
+    expect(reminderLines.every(line => line.includes('description/justification'))).toBe(true)
   })
 
-  it('reinforces each new turn but never adds messages to tool continuations or the stopping probe', async () => {
+  it('reinforces every non-empty step but never adds messages to the stopping probe', async () => {
     const { fire } = await setup()
     const input: PreStepDecision = { kind: 'enter', messages: [user()] }
     for (const turn of [1, 2]) {
       const first = await fire(input, 1, turn)
       expect(first.kind === 'enter' && first.messages.length).toBe(2)
-      expect(await fire(input, 2, turn)).toBe(input)
+      const continuation = await fire(input, 2, turn)
+      expect(continuation.kind === 'enter' && continuation.messages.length).toBe(2)
+      expect(continuation.kind === 'enter' && continuation.messages.at(-1)?.source).toEqual({
+        kind: 'plugin',
+        plugin: language.LANGUAGE_REMINDER_SOURCE,
+      })
       const stopping: PreStepDecision = { kind: 'enter', messages: [] }
       expect(await fire(stopping, 10, turn)).toBe(stopping)
     }
     expect(input.messages).toHaveLength(1)
   })
 
-  it('does not duplicate an existing reminder in a prepared first-step batch', async () => {
+  it('does not duplicate an existing reminder in a prepared step batch', async () => {
     const { fire } = await setup()
     const first = await fire({ kind: 'enter', messages: [user()] })
     expect(await fire(first)).toBe(first)

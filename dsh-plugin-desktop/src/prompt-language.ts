@@ -6,8 +6,8 @@
  * This provider registers one global
  * `ctx.systemPrompt` section, so the directive participates in every agent
  * assembly — including preset agents, which only shadow the `deployment:persona`
- * slot by name. A short first-step reminder reinforces it after other context
- * injections once per turn. Registration is disposed with the plugin.
+ * slot by name. A short reminder reinforces it after other context injections
+ * on every non-empty step. Registration is disposed with the plugin.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -41,12 +41,14 @@ export const LANGUAGE_DIRECTIVE = [
 /** Stable attribution for the turn reminder; never presented as human input. */
 export const LANGUAGE_REMINDER_SOURCE = 'dsh-plugin-desktop/prompt-language'
 
-/** Short turn-local reinforcement, without changing tool schemas or commands. */
+/** Short step-local reinforcement, without changing tool schemas or commands. */
 export const LANGUAGE_REMINDER =
-  '本轮交流语言：默认简体中文，用户明确指定其他交流语言时遵从用户要求。每条执行前说明、工具间进度、提问、错误解释、最终回复，以及工具中供用户阅读的 description/justification 等字段，都应遵守这一要求。英文技能或工具内容不改变交流语言；代码、命令、路径、日志原文及指定语言的交付内容保持原样。'
+  'Use Simplified Chinese for all user-visible progress between tool calls and other user-facing text, including description/justification, unless the user explicitly requests another language; preserve code, commands, paths, logs, and requested-language deliverables.\n'
+  + '除非用户明确指定其他语言，否则所有工具调用间的可见进度和其他面向用户的文本（包括 description/justification）均使用简体中文；代码、命令、路径、日志原文和指定语言的交付内容保持原样。'
 
 /**
- * Register the system rule and a bounded, attributed first-step reminder.
+ * Register the system rule and a bounded, attributed reminder for each
+ * non-empty step.
  * @param ctx - Host context carrying the system-prompt registry.
  */
 export function apply(ctx: Context): void {
@@ -56,10 +58,10 @@ export function apply(ctx: Context): void {
     text: LANGUAGE_DIRECTIVE,
   })
 
-  ctx.on('agent/pre-step', async ({ step, signal }, next): Promise<PreStepDecision> => {
+  ctx.on('agent/pre-step', async ({ signal }, next): Promise<PreStepDecision> => {
     const decision = await next()
     // Do not revive a rejected/empty turn or prolong a completed tool loop.
-    if (decision.kind === 'reject' || step !== 1 || decision.messages.length === 0) return decision
+    if (decision.kind === 'reject' || decision.messages.length === 0) return decision
     signal.throwIfAborted()
     if (decision.messages.some(message => message.source.kind === 'plugin'
       && message.source.plugin === LANGUAGE_REMINDER_SOURCE)) return decision
