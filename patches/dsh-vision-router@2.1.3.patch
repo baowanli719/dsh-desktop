@@ -171,3 +171,89 @@ index c2b2d56a5190dc6a3c20695535871481bb67e132..a26cc796e61801d608dc6a99a53a1a49
      if (!takeoverSettled || stealthActive || takeoverAttempted) return
      if (adapterAvailable(ctx.llm, 'deepseek-official')) {
        if (stealthEnabled) {
+diff --git a/lib/client-presentation-boundary-main.js b/lib/client-presentation-boundary-main.js
+index e10fe7c4fad08ed06af62cdc4ee89fe901b9e143..1f65ed5ab1883ac6917aba3c0e4dd33c17464757 100644
+--- a/lib/client-presentation-boundary-main.js
++++ b/lib/client-presentation-boundary-main.js
+@@ -160,6 +160,26 @@ export function resolveVisionModePair(groups, current, config = {}) {
+   return { mode: 'off', target: visionModeTarget(current, twinProvider) }
+ }
+ 
++// Desktop-managed vision: select the owned image-capable twin automatically.
++// The directory remains the authority; failed selections never fake success
++// or retry indefinitely, and a later ordinary model choice gets its own twin.
++export function requestManagedVision(state, config, attempt, select) {
++  if (!state || state.status === 'idle' || state.status === 'loading' || state.status === 'selecting') return
++  const pair = resolveVisionModePair(state.groups, state.current, config)
++  if (pair.mode !== 'off') {
++    attempt.key = undefined
++    return
++  }
++  const key = JSON.stringify(pair.target)
++  if (attempt.key === key) return
++  attempt.key = key
++  try {
++    return Promise.resolve(select(pair.target)).then(value => value !== false, () => false)
++  } catch {
++    return Promise.resolve(false)
++  }
++}
++
+ const VISION_MODE_HELPER_SOURCE = [
+   visionModeGroup,
+   visionModeHasModel,
+@@ -172,6 +192,7 @@ const VISION_MODE_HELPER_SOURCE = [
+   visionModeOwnedWrapper,
+   visionModeTarget,
+   resolveVisionModePair,
++  requestManagedVision,
+ ].map((fn) => fn.toString()).join('\n')
+ 
+ /**
+@@ -1062,6 +1083,21 @@ export const CLIENT_PRESENTATION_PRELUDE = String.raw`(function(){
+         var toastState = React.useState(null);
+         var toast = toastState[0];
+         var setToast = toastState[1];
++        var managedAttempt = React.useRef({});
++        React.useEffect(function() {
++          var attempt = { live: true };
++          managedAttempt.current = attempt;
++          return function() { attempt.live = false; };
++        }, [directory]);
++        React.useEffect(function() {
++          if (props.available !== true || (props.session && props.session.removed === true)) return;
++          var attempt = managedAttempt.current;
++          var operation = requestManagedVision(state, visionConfig, attempt, props.select);
++          if (!operation) return;
++          operation.then(function(accepted) {
++            if (attempt.live && !accepted) announceRejectedSelection();
++          });
++        }, [directory, state, visionConfig, props.available, pair.mode, pair.target && pair.target.provider]);
+         var busy = state.status === 'selecting';
+         var loading = state.status === 'idle' || state.status === 'loading';
+         var removed = props.session && props.session.removed === true;
+@@ -1154,7 +1190,8 @@ export const CLIENT_PRESENTATION_PRELUDE = String.raw`(function(){
+               onDone: function(){ setToast(null); }
+             })
+           : null;
+-        return React.createElement(React.Fragment, null, button, toastNode);
++        // Vision is supplied by gs-worker, so there is no user-facing mode switch.
++        return toastNode;
+       }
+ 
+       scope.effect(function() {
+diff --git a/lib/client.js b/lib/client.js
+index c19285d966224625001e91f350b726dac6a29575..feea7a44d783d68389df2a4039324915071dca25 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -4377,8 +4377,8 @@ window.__ModuleLoader__.load({
+         }
+       }, 'vision-router: remote settings scope')
+       ctx.effect(installStyles, 'vision-router: card styles')
+-      ctx.effect(() => installVisionSettingsGuide(t), 'vision-router: model selection guide')
+-      ctx.effect(() => installOnboarding(t), 'vision-router: first-run onboarding')
++      // gs-worker supplies the vision backend. Never run setup UI, including
++      // before the mirrored settings have loaded on a fresh Renderer.
+       // A stable props object: the memoized card skips re-renders only when
+       // this identity stays fixed across slot renders.
+       const subscribeConnectionReset = (listener) => ctx.on('connection/reset', listener)

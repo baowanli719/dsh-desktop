@@ -99,11 +99,14 @@ export interface GsVisionRouterHttpProvider {
  * Mirrored `vision-router:` settings section: the loopback vision backend,
  * with the anonymous external fallback chain disabled. Owned outright by the
  * mirror, so manual edits in the Vision Router settings card are overwritten
- * on the next boot, matching the server-managed model plane.
+ * on the next boot, matching the server-managed model plane. The mirror also
+ * pins `onboardingSeen` so the plugin's first-run setup modal never appears:
+ * the vision model is server-managed and needs no user configuration.
  */
 export interface GsVisionRouterSection {
   readonly httpProviders: readonly GsVisionRouterHttpProvider[]
   readonly freeFallback: false
+  readonly onboardingSeen: true
 }
 
 /** Inputs for {@link planGsLlmModelProfile}. */
@@ -146,6 +149,7 @@ export function planGsVisionRouterSection(
       maxTokens: 4096,
     }],
     freeFallback: false,
+    onboardingSeen: true,
   }
 }
 

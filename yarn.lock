@@ -13675,7 +13675,7 @@ __metadata:
 
 "dsh-vision-router@patch:dsh-vision-router@npm%3A2.1.3#./patches/dsh-vision-router@2.1.3.patch::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 2.1.3
-  resolution: "dsh-vision-router@patch:dsh-vision-router@npm%3A2.1.3#./patches/dsh-vision-router@2.1.3.patch::version=2.1.3&hash=80052d&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "dsh-vision-router@patch:dsh-vision-router@npm%3A2.1.3#./patches/dsh-vision-router@2.1.3.patch::version=2.1.3&hash=792b2f&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:>=3.18.0"
     potrace: "npm:^2.1.8"
@@ -13694,7 +13694,7 @@ __metadata:
       optional: true
   bin:
     dsh-vision-router: lib/doctor-cli-p0.js
-  checksum: 10c0/e36cf0af20cf12a0ebdcf517e2856f640276ff6b503f4f6e8eaae8bd36436188e0c3ff4fe3e0b8901473b2b67c5dbdb7a971612e36fb25aa925255ebb015a16b
+  checksum: 10c0/665a30e68aa15c1d42690fa32a021fd1115f73a18cf8eb1d153127a4ee46df284c3a6cd3ddc59d73e9fe976c570b821e51c578eaee6029e5894b8381b6c7eebb
   languageName: node
   linkType: hard
 

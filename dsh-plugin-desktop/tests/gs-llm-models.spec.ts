@@ -132,6 +132,7 @@ describe('gsclaw-server model plan', () => {
         maxTokens: 4096,
       }],
       freeFallback: false,
+      onboardingSeen: true,
     }
     // The vision backend rides the gateway's visionModel allowance, so it is
     // planned even when the user-selectable model list is missing or empty.
