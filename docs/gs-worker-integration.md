@@ -148,12 +148,34 @@ ClientConfig 的 `appUpdate` 字段(`GsAppUpdateConfig`,`src/server/gs-contract.
 
 1. **版本号**:`dsh-plugin-desktop/package.json` 的 `version` 升一级,并同步钉死它的断言——`tests/package.spec.ts` 的应用身份断言、`tests/electron-runtime.spec.ts` 的 `productVersion` / `appVersion` / `currentVersion` 三处,以及 README 中英文两版的版本引用与 `README.i18n.yaml` 的 blob 哈希记录。版本号 bump 与功能改动分开提交。
 2. **打包**:`corepack yarn dist:win`(先跑 Windows 可运行的 gate,全绿才出包)。electron-builder 要从 GitHub 拉 Electron 与 NSIS 组件,网络受限时在命令前加 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 与 `ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`。产物为 `dsh-plugin-desktop/dist/gs-worker-<version>-x64-Setup.exe`,本地记录 sha256 备查;本地构建不做 Authenticode 签名(签名是独立的人工发布步骤,未签名包会被 SmartScreen 提示 Unknown publisher)。
-3. **托管**:安装包必须放在客户端可直连的 http(s) 直链上——无需登录、GET 返回 200、支持 Range。当前生产约定是 CorAliyun(8.138.102.170)nginx 443 站点的 `/downloads/` 位置(`location ^~ /downloads/` 映射 `/opt/gs-downloads/`,只读、禁非 GET/HEAD、带 `Content-Disposition: attachment`;改动前的站点配置备份在服务器 `/etc/nginx/litellm.bak-*`),scp 上传后必须核对服务端 sha256 与本地一致。另一条路是 gsclaw-server 自带的 `PUT /api/admin/releases/packages/:platform/:filename`(文件落服务端 `downloads/` 目录,直链形如 `/gsworker/downloads/<filename>`),但该部署前置 nginx 请求体上限会 413 大安装包,需要先把 `client_max_body_size` 调到 2048m 并 reload。
+3. **托管**:安装包必须放在客户端可直连的 http(s) 直链上——无需登录、GET 返回 200、支持 Range。当前生产约定是 CorAliyun(8.138.102.170)nginx 443 站点的 `/downloads/` 位置(`location ^~ /downloads/` 映射 `/opt/gs-downloads/`,只读、禁非 GET/HEAD、带 `Content-Disposition: attachment`;改动前的站点配置备份在服务器 `/etc/nginx/litellm.bak-*`)。通过同一站点的 `PUT /upload/<filename>` 加 Basic 鉴权上传,操作见下节;上传后必须核对服务端 sha256 与本地一致。另一条路是 gsclaw-server 自带的 `PUT /api/admin/releases/packages/:platform/:filename`(文件落服务端 `downloads/` 目录,直链形如 `/gsworker/downloads/<filename>`),但该部署前置 nginx 请求体上限会 413 大安装包,需要先把 `client_max_body_size` 调到 2048m 并 reload。
 4. **登记**:`POST <endpoint>/api/admin/releases/publish`,`Authorization: Bearer <RELEASE_API_TOKEN>`(服务端 `.env` 配置,推荐)或管理员账号 JWT(`POST /api/auth/login` 需先过图形验证码)。body 为 `{"appUpdate": {...}}`,字段要求:`version` 只接受纯数字分段 SemVer(无 prerelease/build),且**严格高于**客户端当前版本才会触发提醒(相等或更低客户端不动作);`downloads` 至少一个平台、值必须是完整直链;`availableFrom` 之前客户端只提示不提供下载;`downloadWindow` 当前客户端不消费,可省略。发布接口只在完整校验通过后才写入,上传或发布失败都不会改变当前已登记版本。
 5. **核验**:`GET <endpoint>/api/admin/releases/current` 返回本次登记内容;`curl -I` 下载直链返回 200 且带 `Accept-Ranges: bytes`;已登录客户端在 5 分钟内(定时拉取)或重启/重新登录后应弹出升级提醒。
 6. **测试技巧**:没有更高版本的包也想触发提醒时,可以临时登记一个更高版本号、直链指向同一个安装包,测完把登记改回真实版本。注意测试残留:登记版本高于已装二进制时,userData `updates/` 里的 managed artifact 不满足"安装后版本 ≥ artifact 版本"的清理条件,会一直滞留并反复提醒,测试结束要手工删除该目录内容并把登记改回。
 
 两条硬性约束:**appUpdate 只适用于 stable 通道**——beta 的 `-beta.N` 版本号不满足服务端 version 字段的纯数字要求,beta 客户端的升级提醒仍走社区通道(`update-checker.ts`);**登记版本必须等于安装包真实版本**——长期虚高会让 managed artifact 永远达不到清理条件,且客户端每次启动都重复提醒。
+
+### CorAliyun HTTPS 安装包上传
+
+2026-09-09 已在现有 nginx 443 站点启用 WebDAV PUT,无需新增端口。账号为 `gs-upload`,上传凭据保存在项目根目录的 `upload.netrc`,运维机 `%USERPROFILE%\.config\gs-worker\upload.netrc` 保留原副本（该副本的 Windows ACL 仅当前用户与 SYSTEM 可访问）。在项目根目录执行 PowerShell 上传命令:
+
+```powershell
+curl.exe --noproxy 8.138.102.170 --fail-with-body --netrc-file ".\upload.netrc" -T "gs-worker-x.y.z-x64-Setup.exe" "https://8.138.102.170/upload/gs-worker-x.y.z-x64-Setup.exe"
+```
+
+也可用 `-u gs-upload` 替代 `--netrc-file ...`,由 curl 提示输入密码。`--noproxy` 用于绕过本机访问该 IP 超时的默认代理。上传新文件返回 201,覆盖同名文件返回 204;正式版本使用独立版本文件名。公开下载地址为 `https://8.138.102.170/downloads/<filename>`,无需凭据,保留 GET/HEAD 和 Range 支持。发布注册前核对:
+
+```powershell
+Get-FileHash -Algorithm SHA256 -LiteralPath "gs-worker-x.y.z-x64-Setup.exe"
+ssh litellm-aliyun 'sha256sum /opt/gs-downloads/gs-worker-x.y.z-x64-Setup.exe'
+curl.exe --noproxy 8.138.102.170 --fail --head "https://8.138.102.170/downloads/gs-worker-x.y.z-x64-Setup.exe"
+```
+
+服务端配置位于 `/etc/nginx/sites-available/litellm`: `/upload/` 只接受 PUT,文件名首字符为 ASCII 字母或数字,后续仅允许字母、数字、点、下划线和连字符,不支持子目录。仅该 location 的请求体上限为 `2048m`,请求体两次读取间超时为 `600s`;桌面更新下载仍受客户端 1 GiB 上限约束。DAV 先写 `/opt/gs-upload-tmp/`（www-data,0700）,再在同一文件系统内 rename 到 `/opt/gs-downloads/`（root:www-data,2775）,新文件权限为 0644。
+
+Basic 密码哈希在 `/etc/nginx/gs-upload.htpasswd`（root:www-data,0640）;运维凭据副本在 `/root/.config/gs-worker-upload/upload.netrc`（0600）。按项目约定,上传凭据放在仓库根目录 `upload.netrc`,不进入安装包。修改 nginx 后执行 `nginx -t && systemctl reload nginx`。本次改动前备份为 `/etc/nginx/litellm.bak-20260909T013229Z-webdav-upload`,原下载目录权限记录在 `/root/.config/gs-worker-upload/rollback.json`;如需撤回上传入口,恢复该站点备份,通过 `nginx -t` 后 reload。
+
+已验证:约 30 MiB 上传与服务端 SHA-256 一致;本机经公网 HTTPS 上传及匿名下载的 SHA-256 一致;未认证/错误密码 PUT 返回 401;下载入口写入和上传入口 GET/DELETE/MKCOL/MOVE/COPY/POST 返回 403;子目录与隐藏文件名返回 400;已有安装包 HEAD 返回 200、Range 返回 206。测试文件均已清理。
 
 ## 配置与运维
 
