@@ -391,6 +391,16 @@ virtualStoreDirMaxLength: 60
     expect(rows.find(row => row.id === 'desktop-profiles')).toEqual(expect.objectContaining({
       name: 'dsh-plugin-desktop/profiles',
     }))
+    expect(rows.find(row => row.id === 'vision-router')).toEqual(expect.objectContaining({
+      name: 'dsh-vision-router',
+      config: expect.objectContaining({
+        freeFallback: false,
+        deepseekTakeover: false,
+        updateCheck: false,
+        downscaleMaxPixels: 2_000_000,
+        maxImageBodyBytes: 2_800_000,
+      }),
+    }))
   })
 
   it('merges a frozen LAN IPv4 snapshot into existing Web runtime trust', () => {

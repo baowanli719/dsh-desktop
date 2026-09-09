@@ -121,6 +121,24 @@ describe('gsclaw-server model plan', () => {
     expect(missing.defaultModel).toBeUndefined()
     expect(missing.warnings.some(warning => warning.includes('no models section'))).toBe(true)
   })
+
+  it('always plans the vision-router backend from the proxy origin', () => {
+    const expected = {
+      httpProviders: [{
+        name: 'gsclaw-vision',
+        baseURL: `${PROXY_ORIGIN}/v1/gs-cloud`,
+        model: 'qwen36-35b',
+        apiKeyEnv: GS_LLM_PROXY_CREDENTIAL_REF,
+        maxTokens: 4096,
+      }],
+      freeFallback: false,
+    }
+    // The vision backend rides the gateway's visionModel allowance, so it is
+    // planned even when the user-selectable model list is missing or empty.
+    expect(planGsLlmModelProfile({ models: MODELS, proxyOrigin: PROXY_ORIGIN }).visionRouter).toEqual(expected)
+    expect(planGsLlmModelProfile({ models: null, proxyOrigin: PROXY_ORIGIN }).visionRouter).toEqual(expected)
+    expect(planGsLlmModelProfile({ models: { providers: {} }, proxyOrigin: PROXY_ORIGIN }).visionRouter).toEqual(expected)
+  })
 })
 
 describe('model settings mirror', () => {
@@ -209,6 +227,34 @@ describe('model settings mirror', () => {
     expect(await mirrorGsLlmModelSettings(documentPath, plan)).toBe(true)
     const root = parseDocument(readFileSync(documentPath, 'utf8')).toJS() as Record<string, unknown>
     expect(root['llm-pi-ai']).toEqual({ providers: plan.providers })
+  })
+
+  it('mirrors the vision-router section, rewrites on origin change, and owns it outright', async () => {
+    const dir = temporaryDir()
+    const documentPath = join(dir, 'settings.yaml')
+    writeFileSync(documentPath, [
+      'vision-router:',
+      '  httpProviders:',
+      '    - name: user-added',
+      '      baseURL: https://evil.example/v1',
+      '      model: evil-vl',
+      '',
+    ].join('\n'))
+    const plan = planGsLlmModelProfile({ models: MODELS, proxyOrigin: PROXY_ORIGIN })
+
+    expect(await mirrorGsLlmModelSettings(documentPath, plan)).toBe(true)
+    const root = parseDocument(readFileSync(documentPath, 'utf8')).toJS() as Record<string, unknown>
+    expect(root['vision-router']).toEqual(plan.visionRouter)
+    expect((root['vision-router'] as { httpProviders: { baseURL: string }[] }).httpProviders[0]?.baseURL)
+      .toBe(`${PROXY_ORIGIN}/v1/gs-cloud`)
+
+    // Same plan is a no-op; a new boot origin rewrites the section.
+    expect(await mirrorGsLlmModelSettings(documentPath, plan)).toBe(false)
+    const rebooted = planGsLlmModelProfile({ models: MODELS, proxyOrigin: 'http://127.0.0.1:43999' })
+    expect(await mirrorGsLlmModelSettings(documentPath, rebooted)).toBe(true)
+    const rewritten = parseDocument(readFileSync(documentPath, 'utf8')).toJS() as Record<string, unknown>
+    expect((rewritten['vision-router'] as { httpProviders: { baseURL: string }[] }).httpProviders[0]?.baseURL)
+      .toBe('http://127.0.0.1:43999/v1/gs-cloud')
   })
 })
 

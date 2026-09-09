@@ -90,6 +90,8 @@ import DesktopSettingsController from './desktop-settings-controller.ts'
 import { gsClientPlatform, type GsSafeStorage } from './server/gs-auth.ts'
 import { GsLlmProxyServer } from './server/gs-llm-proxy.ts'
 import {
+  GS_VISION_MODEL_ID,
+  GS_VISION_PROVIDER_ID,
   gsLlmProxyLaunchEnvironment,
   mirrorGsLlmModelSettings,
   planGsLlmModelProfile,
@@ -210,10 +212,9 @@ const PRODUCT_NAME = DESKTOP_PRODUCT_NAME
 
 // The server-side vision model is reachable only through the LLM gateway's
 // visionModel allowance (gsclaw-server llmProxy); it never appears in the
-// user-selectable model list pushed to the client.
+// user-selectable model list pushed to the client. Provider/model ids live in
+// gs-llm-models.ts beside the mirrored Vision Router backend section.
 const DESKTOP_VISION_MCP_SERVER_NAME = 'vision'
-const DESKTOP_VISION_PROVIDER_ID = 'gs-cloud'
-const DESKTOP_VISION_MODEL_ID = 'qwen36-35b'
 
 /** Require OS-backed secret storage; Linux's plaintext fallback is not sufficient for a CA key. */
 function desktopLanHttpsPrivateKeyProtector(): DesktopLanHttpsPrivateKeyProtector {
@@ -1508,8 +1509,8 @@ async function start(): Promise<void> {
               ELECTRON_RUN_AS_NODE: '1',
               VISION_PROXY_ORIGIN: gsLlmProxy.origin,
               VISION_PROXY_TOKEN: gsLlmProxy.token,
-              VISION_PROVIDER_ID: DESKTOP_VISION_PROVIDER_ID,
-              VISION_MODEL_ID: DESKTOP_VISION_MODEL_ID,
+              VISION_PROVIDER_ID: GS_VISION_PROVIDER_ID,
+              VISION_MODEL_ID: GS_VISION_MODEL_ID,
             },
             toolCallTimeoutMs: 120_000,
             failOnStartupError: false,

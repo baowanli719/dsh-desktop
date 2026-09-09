@@ -39,6 +39,9 @@ const ALLOWED_LICENSES = new Set([
   '(MIT OR GPL-3.0-or-later)',
   // pako combines two allowlisted permissive licenses.
   '(MIT AND Zlib)',
+  // sax (via dsh-vision-router's potrace) uses the Blue Oak Model License,
+  // a permissive MIT-equivalent license (npm itself ships under it).
+  'BlueOak-1.0.0',
 ])
 
 /**
@@ -67,6 +70,10 @@ const NOTICE_LICENSES = new Set([
   // parties without legal review, and keep the source offer intact (the
   // package source is public upstream).
   'AGPL-3.0',
+  // potrace (via dsh-vision-router, vision_trace SVG vectorization) is
+  // GPL-2.0. Same posture as the AGPL entry above: internal distribution
+  // only, source offer intact (package source is public upstream).
+  'GPL-2.0',
 ])
 
 /**

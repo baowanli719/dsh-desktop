@@ -1,0 +1,173 @@
+diff --git a/index.js b/index.js
+index c2b2d56a5190dc6a3c20695535871481bb67e132..a26cc796e61801d608dc6a99a53a1a492952a480 100644
+--- a/index.js
++++ b/index.js
+@@ -290,6 +290,12 @@ export const Config = z.object({
+   // 默认关闭（issue #34 明确 opt-in）：关闭时官方 deepseek-official 路由
+   // 原样保留；唯一例外见 apply 里的 keep-alive 兜底（官方行被禁用时）。
+   stealth: z.boolean().default(false),
++  // gs-worker desktop: product switches captured from the composition row
++  // config; defaults preserve upstream behavior.
++  deepseekTakeover: z.boolean().default(true),
++  updateCheck: z.boolean().default(true),
++  // Total raw-byte budget for inline images in one vision request; 0 disables.
++  maxImageBodyBytes: z.number().step(1).min(0).default(0),
+   textProvider: z
+     .object({
+       provider: z.string().default('deepseek-official'),
+@@ -2050,6 +2056,16 @@ export async function downscaleImage(bytes, maxPixels, options = {}) {
+  * built-in default is the OVHcloud AI Endpoints anonymous layer — a free,
+  * registration-free vision endpoint (2 requests/min/IP, best-effort).
+  */
++// gs-worker desktop product gates, captured once per activation from the
++// composition row config: the user-editable settings document (merged into
++// `current()`) cannot re-enable what the product row disabled.
++const productGates = {
++  deepseekTakeover: true,
++  updateCheck: true,
++  freeFallback: true,
++  maxImageBodyBytes: 0,
++}
++
+ export const DEFAULT_HTTP_PROVIDERS = [
+   // OVHcloud anonymous quota is per IP AND per model. Keep the free chain
+   // ordered largest -> smallest so quality wins first. A 429 on one model can
+@@ -2231,6 +2247,7 @@ export async function callLocalBackend(provider, messages, options = {}) {
+ }
+ 
+ export function httpProvidersOf(config, allowDefault = true) {
++  if (productGates.freeFallback === false) allowDefault = false
+   const configured = Array.isArray(config.httpProviders)
+     ? config.httpProviders.filter(
+         (p) => p && typeof p.baseURL === 'string' && typeof p.model === 'string',
+@@ -2274,7 +2291,7 @@ export function orderedHttpProviders(config = {}, freeFirst = false) {
+   }
+   const free = providers.filter((p) => builtinIds.has(identity(p))).sort(byBuiltinOrder)
+   const rest = providers.filter((p) => !builtinIds.has(identity(p)))
+-  if (config.freeFallback === false) return [...free, ...rest]
++  if (config.freeFallback === false || productGates.freeFallback === false) return [...free, ...rest]
+   // Default: the complete built-in keyless tier leads, then every configured
+   // row whose identity (endpoint + model + credential) is not already covered.
+   return [...DEFAULT_HTTP_PROVIDERS, ...rest]
+@@ -2348,6 +2365,65 @@ export function toAnthropicContent(content) {
+   return out
+ }
+ 
++const INLINE_IMAGE_DATA_URI = /^data:([^;,]+);base64,(.+)$/
++
++/**
++ * gs-worker desktop: both LLM proxy hops cap request bodies at 4 MiB, and
++ * the pixel-budget downscale never fires for small-but-dense PNGs whose raw
++ * bytes already exceed the cap. Bound the TOTAL raw inline-image bytes of one
++ * request instead: re-encode oversized images as JPEG with a descending
++ * quality ladder, then halve dimensions as a last resort; fail closed with
++ * VISION_IMAGE_PREPROCESS_FAILED when the budget cannot be met.
++ */
++async function boundInlineImageBytes(messages, totalBudget) {
++  const parts = []
++  for (const message of messages ?? []) {
++    const content = message ? message.content : undefined
++    if (!Array.isArray(content)) continue
++    for (const part of content) {
++      if (!part || part.type !== 'image_url') continue
++      const url = part.image_url && part.image_url.url
++      const match = typeof url === 'string' ? INLINE_IMAGE_DATA_URI.exec(url) : null
++      if (match) parts.push({ part, bytes: Buffer.from(match[2], 'base64') })
++    }
++  }
++  if (parts.length === 0) return
++  const total = parts.reduce((sum, entry) => sum + entry.bytes.length, 0)
++  if (total <= totalBudget) return
++  const fail = (cause) => {
++    const error = new Error('VISION_IMAGE_PREPROCESS_FAILED: inline images exceed the request byte budget')
++    error.code = 'VISION_IMAGE_PREPROCESS_FAILED'
++    if (cause !== undefined) error.cause = cause
++    throw error
++  }
++  const sharp = await loadSharp().catch(() => undefined)
++  if (sharp === undefined) fail()
++  const perImage = Math.max(262144, Math.floor(totalBudget / parts.length))
++  for (const entry of parts) {
++    if (entry.bytes.length <= perImage) continue
++    let output
++    for (const quality of [80, 65, 50, 35]) {
++      output = await sharp(entry.bytes, { failOn: 'none' }).jpeg({ quality }).toBuffer().catch(() => undefined)
++      if (output && output.length <= perImage) break
++      output = undefined
++    }
++    let width
++    const meta = await sharp(entry.bytes, { failOn: 'none' }).metadata().catch(() => undefined)
++    width = meta && typeof meta.width === 'number' ? meta.width : undefined
++    while (output === undefined && width !== undefined && width > 640) {
++      width = Math.floor(width / 2)
++      output = await sharp(entry.bytes, { failOn: 'none' })
++        .resize({ width, withoutEnlargement: true })
++        .jpeg({ quality: 60 })
++        .toBuffer()
++        .catch(() => undefined)
++      if (output && output.length > perImage) output = undefined
++    }
++    if (output === undefined || output.length > perImage) fail()
++    entry.part.image_url.url = `data:image/jpeg;base64,${output.toString('base64')}`
++  }
++}
++
+ export async function callOpenAICompatible(provider, messages, options = {}) {
+   const headers = { 'content-type': 'application/json' }
+   const apiKeyEnv = typeof provider.apiKeyEnv === 'string' ? provider.apiKeyEnv : ''
+@@ -2373,6 +2449,9 @@ export async function callOpenAICompatible(provider, messages, options = {}) {
+     ...(typeof options.temperature === 'number' ? { temperature: options.temperature } : {}),
+     ...(typeof options.top_p === 'number' ? { top_p: options.top_p } : {}),
+   }
++  if (productGates.maxImageBodyBytes > 0) {
++    await boundInlineImageBytes(body.messages, productGates.maxImageBodyBytes)
++  }
+   const url = `${provider.baseURL.replace(/\/$/, '')}/chat/completions`
+   const request = () =>
+     fetchWithOpenAICompatibility(
+@@ -3096,6 +3175,10 @@ export function isOpenAIHttpBridgeTransport(transport) {
+ }
+ 
+ export function apply(ctx, config = {}, runtime = {}) {
++  productGates.deepseekTakeover = config.deepseekTakeover !== false
++  productGates.updateCheck = config.updateCheck !== false
++  productGates.freeFallback = config.freeFallback !== false
++  productGates.maxImageBodyBytes = typeof config.maxImageBodyBytes === 'number' ? config.maxImageBodyBytes : 0
+   // Route sharp version diagnostics (issue #75) through the harness logger
+   // instead of console.warn, so the warning lands in the server log.
+   registerSharpWarningHook((message) => {
+@@ -3356,15 +3439,17 @@ export function apply(ctx, config = {}, runtime = {}) {
+           : undefined,
+     },
+   })
+-  void updateChecker.check(false).then((result) => {
+-    if (result && result.ok === true && result.updateAvailable === true) {
+-      ctx.logger?.info(
+-        'vision-router: update available %s -> %s',
+-        result.currentVersion,
+-        result.latestVersion,
+-      )
+-    }
+-  })
++  if (productGates.updateCheck !== false) {
++    void updateChecker.check(false).then((result) => {
++      if (result && result.ok === true && result.updateAvailable === true) {
++        ctx.logger?.info(
++          'vision-router: update available %s -> %s',
++          result.currentVersion,
++          result.latestVersion,
++        )
++      }
++    })
++  }
+ 
+   // ── stealth takeover: serve `deepseek-official` ourselves ────────────────
+   //
+@@ -3462,6 +3547,7 @@ export function apply(ctx, config = {}, runtime = {}) {
+     }
+   }
+   const maybeTakeover = () => {
++    if (productGates.deepseekTakeover === false) return
+     if (!takeoverSettled || stealthActive || takeoverAttempted) return
+     if (adapterAvailable(ctx.llm, 'deepseek-official')) {
+       if (stealthEnabled) {
