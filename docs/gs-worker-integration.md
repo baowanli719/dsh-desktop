@@ -157,10 +157,10 @@ ClientConfig 的 `appUpdate` 字段(`GsAppUpdateConfig`,`src/server/gs-contract.
 
 ### CorAliyun HTTPS 安装包上传
 
-2026-09-09 已在现有 nginx 443 站点启用 WebDAV PUT,无需新增端口。账号为 `gs-upload`,随机密码保存在运维机 `%USERPROFILE%\.config\gs-worker\upload.netrc`（Windows ACL 仅当前用户与 SYSTEM 可访问）。PowerShell 上传命令:
+2026-09-09 已在现有 nginx 443 站点启用 WebDAV PUT,无需新增端口。账号为 `gs-upload`,上传凭据保存在项目根目录的 `upload.netrc`,运维机 `%USERPROFILE%\.config\gs-worker\upload.netrc` 保留原副本（该副本的 Windows ACL 仅当前用户与 SYSTEM 可访问）。在项目根目录执行 PowerShell 上传命令:
 
 ```powershell
-curl.exe --noproxy 8.138.102.170 --fail-with-body --netrc-file "$env:USERPROFILE\.config\gs-worker\upload.netrc" -T "gs-worker-x.y.z-x64-Setup.exe" "https://8.138.102.170/upload/gs-worker-x.y.z-x64-Setup.exe"
+curl.exe --noproxy 8.138.102.170 --fail-with-body --netrc-file ".\upload.netrc" -T "gs-worker-x.y.z-x64-Setup.exe" "https://8.138.102.170/upload/gs-worker-x.y.z-x64-Setup.exe"
 ```
 
 也可用 `-u gs-upload` 替代 `--netrc-file ...`,由 curl 提示输入密码。`--noproxy` 用于绕过本机访问该 IP 超时的默认代理。上传新文件返回 201,覆盖同名文件返回 204;正式版本使用独立版本文件名。公开下载地址为 `https://8.138.102.170/downloads/<filename>`,无需凭据,保留 GET/HEAD 和 Range 支持。发布注册前核对:
@@ -173,7 +173,7 @@ curl.exe --noproxy 8.138.102.170 --fail --head "https://8.138.102.170/downloads/
 
 服务端配置位于 `/etc/nginx/sites-available/litellm`: `/upload/` 只接受 PUT,文件名首字符为 ASCII 字母或数字,后续仅允许字母、数字、点、下划线和连字符,不支持子目录。仅该 location 的请求体上限为 `2048m`,请求体两次读取间超时为 `600s`;桌面更新下载仍受客户端 1 GiB 上限约束。DAV 先写 `/opt/gs-upload-tmp/`（www-data,0700）,再在同一文件系统内 rename 到 `/opt/gs-downloads/`（root:www-data,2775）,新文件权限为 0644。
 
-Basic 密码哈希在 `/etc/nginx/gs-upload.htpasswd`（root:www-data,0640）;运维凭据副本在 `/root/.config/gs-worker-upload/upload.netrc`（0600）。凭据不入仓库、不进入安装包。修改 nginx 后执行 `nginx -t && systemctl reload nginx`。本次改动前备份为 `/etc/nginx/litellm.bak-20260909T013229Z-webdav-upload`,原下载目录权限记录在 `/root/.config/gs-worker-upload/rollback.json`;如需撤回上传入口,恢复该站点备份,通过 `nginx -t` 后 reload。
+Basic 密码哈希在 `/etc/nginx/gs-upload.htpasswd`（root:www-data,0640）;运维凭据副本在 `/root/.config/gs-worker-upload/upload.netrc`（0600）。按项目约定,上传凭据放在仓库根目录 `upload.netrc`,不进入安装包。修改 nginx 后执行 `nginx -t && systemctl reload nginx`。本次改动前备份为 `/etc/nginx/litellm.bak-20260909T013229Z-webdav-upload`,原下载目录权限记录在 `/root/.config/gs-worker-upload/rollback.json`;如需撤回上传入口,恢复该站点备份,通过 `nginx -t` 后 reload。
 
 已验证:约 30 MiB 上传与服务端 SHA-256 一致;本机经公网 HTTPS 上传及匿名下载的 SHA-256 一致;未认证/错误密码 PUT 返回 401;下载入口写入和上传入口 GET/DELETE/MKCOL/MOVE/COPY/POST 返回 403;子目录与隐藏文件名返回 400;已有安装包 HEAD 返回 200、Range 返回 206。测试文件均已清理。
 

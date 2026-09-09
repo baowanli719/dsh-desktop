@@ -149,10 +149,10 @@ Two hard constraints: **appUpdate only covers the stable channel** — a beta `-
 
 ### CorAliyun HTTPS installer uploads
 
-WebDAV PUT was enabled on the existing nginx 443 site on 2026-09-09, with no additional port. The account is `gs-upload`; its random password is stored in `%USERPROFILE%\.config\gs-worker\upload.netrc` on the operator's machine (Windows ACL restricted to the current user and SYSTEM). Upload from PowerShell:
+WebDAV PUT was enabled on the existing nginx 443 site on 2026-09-09, with no additional port. The account is `gs-upload`; upload credentials are stored in `upload.netrc` at the project root. The original copy remains in `%USERPROFILE%\.config\gs-worker\upload.netrc` on the operator's machine (that copy has a Windows ACL restricted to the current user and SYSTEM). Upload from PowerShell at the project root:
 
 ```powershell
-curl.exe --noproxy 8.138.102.170 --fail-with-body --netrc-file "$env:USERPROFILE\.config\gs-worker\upload.netrc" -T "gs-worker-x.y.z-x64-Setup.exe" "https://8.138.102.170/upload/gs-worker-x.y.z-x64-Setup.exe"
+curl.exe --noproxy 8.138.102.170 --fail-with-body --netrc-file ".\upload.netrc" -T "gs-worker-x.y.z-x64-Setup.exe" "https://8.138.102.170/upload/gs-worker-x.y.z-x64-Setup.exe"
 ```
 
 Alternatively, replace `--netrc-file ...` with `-u gs-upload` to let curl prompt for the password. `--noproxy` bypasses the local default proxy that times out for this IP. Creating a file returns 201; replacing the same filename returns 204. Use distinct versioned filenames for releases. The public download URL is `https://8.138.102.170/downloads/<filename>`, requires no credentials, and retains GET/HEAD and Range support. Before registering a release, verify:
@@ -165,7 +165,7 @@ curl.exe --noproxy 8.138.102.170 --fail --head "https://8.138.102.170/downloads/
 
 The server configuration is `/etc/nginx/sites-available/litellm`. `/upload/` accepts only PUT, with a filename starting with an ASCII letter or digit and containing only letters, digits, dots, underscores, and hyphens; subdirectories are unsupported. Only this location has a `2048m` request-body limit and a `600s` timeout between body reads; desktop update downloads retain their client-side 1 GiB cap. DAV writes into `/opt/gs-upload-tmp/` (www-data,0700), then renames on the same filesystem into `/opt/gs-downloads/` (root:www-data,2775), with new files set to 0644.
 
-The Basic password hash is in `/etc/nginx/gs-upload.htpasswd` (root:www-data,0640); an operator credential copy is in `/root/.config/gs-worker-upload/upload.netrc` (0600). Keep credentials out of the repository and installers. After changing nginx, run `nginx -t && systemctl reload nginx`. The pre-change backup is `/etc/nginx/litellm.bak-20260909T013229Z-webdav-upload`; original download-directory permissions are recorded in `/root/.config/gs-worker-upload/rollback.json`. To withdraw the upload endpoint, restore that site backup, pass `nginx -t`, and reload.
+The Basic password hash is in `/etc/nginx/gs-upload.htpasswd` (root:www-data,0640); an operator credential copy is in `/root/.config/gs-worker-upload/upload.netrc` (0600). By project convention, upload credentials live in the repository root as `upload.netrc`; keep them out of installers. After changing nginx, run `nginx -t && systemctl reload nginx`. The pre-change backup is `/etc/nginx/litellm.bak-20260909T013229Z-webdav-upload`; original download-directory permissions are recorded in `/root/.config/gs-worker-upload/rollback.json`. To withdraw the upload endpoint, restore that site backup, pass `nginx -t`, and reload.
 
 Verified: a roughly 30 MiB upload matched the server SHA-256; a public HTTPS upload and anonymous download from the operator's machine had matching SHA-256; missing/incorrect credentials returned 401 for PUT; writes to the download endpoint and GET/DELETE/MKCOL/MOVE/COPY/POST to the upload endpoint returned 403; nested paths and hidden filenames returned 400; existing installers returned 200 for HEAD and 206 for Range. All test uploads were removed.
 
