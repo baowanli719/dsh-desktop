@@ -104,6 +104,10 @@ Agent loop 从不直连模型提供商。`src/server/gs-llm-proxy.ts` 在本机 
 
 provider 同时维护一份同步快照(`gsSkillSync` tracker):记录最近一次目录同步的状态、成功时间、技能 lite 列表,以及 `masterOff`(总开关是否关闭)与 `switchedOff`(被逐技能 `off` 挡掉的技能数),拉取失败时保留上次成功快照并写一条 `warn` 日志。设置页的"技能"区块(`src/client/DesktopSkillsSection.tsx`)展示这份服务器下发技能列表与最近同步时间,数据经私有同源路由 `GET /api/gs-server/skills` 读取,渲染进程同样不接触令牌。空态按优先级区分:`masterOff` 时提示"服务端已禁用技能功能";目录为空但有技能被管控关闭时提示数量("N 个技能被服务端管控关闭");否则提示"服务器暂未下发技能";目录非空且有被挡技能时追加一行数量提示。
 
+技能目录条目新增可选 `defaultEnabled`：`false` 表示静默下发（设置页可见，但不注册到模型技能目录、不加载 bundle/definition、不加入远程执行目录），`true` 表示默认启用；省略兼容旧服务端的默认启用行为。用户可在设置页开关技能，通过私有同源 `POST /api/gs-server/skills` 提交 `{ "name": "skill-name", "enabled": false }`。选择保存在 `<userData>/gs-skills/preferences/<端点与账号的 SHA-256>/<技能名>.json`，按服务端端点和用户隔离，重启、技能版本更新及重复推送后仍保留。用户选择优先于 `defaultEnabled`；授权、legacy `enabled: false`、ClientConfig 总开关与逐技能 `off` 仍是服务端强制限制。用户关闭的条目保留可见且可再次启用。
+
+服务端对接要求：legacy `/api/skills` 与 v1 `/api/v1/skills/catalog` 都应返回有权限的静默技能，并附带 `defaultEnabled: false`；不得用 `enabled: false` 或 ClientConfig `off` 表示静默下发，否则技能仍会被强制过滤。默认启用配置下发 `defaultEnabled: true`，不可覆盖用户已保存的关闭选择。此字段为本次客户端新增协议，外部 gsclaw-server 仓库需同步实现；本仓库不包含服务端实现。
+
 ### 服务端技能执行(data-query / server-mcp)
 
 技能的 `runtimeType` 决定执行通路。每次目录同步先做能力握手 `GET /api/v1/meta`:有 `skillExecution` 能力时走新协议 `GET /api/v1/skills/catalog`(含全部三种类型,服务端已做 enabled + 授权 + ClientConfig 过滤);缺该字段的旧服务端回退 legacy `/api/skills`,远程类型不可见、行为与旧版一致。

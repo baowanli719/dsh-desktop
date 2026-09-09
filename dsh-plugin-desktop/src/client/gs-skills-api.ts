@@ -10,6 +10,7 @@ import {
 /** Server-skill visibility consumed by the Desktop settings section. */
 export interface DesktopGsSkillsApi {
   readSkills(): Promise<GsSkillsView>
+  setEnabled(name: string, enabled: boolean): Promise<GsSkillsView>
 }
 
 const MAX_SKILL_COUNT = 500
@@ -64,11 +65,13 @@ export function parseGsSkillsView(value: unknown): GsSkillsView {
       || (item.execution !== undefined
         && (typeof item.execution !== 'string' || !EXECUTION_KINDS.has(item.execution)))
       || (item.available !== undefined && typeof item.available !== 'boolean')
+      || (item.enabled !== undefined && typeof item.enabled !== 'boolean')
       || !isOptionalBoundedText(item.unavailableReason)) {
       throw new Error('dsh-plugin-desktop: invalid gs-server skill entry')
     }
     skills.push(Object.freeze({
       name: item.name,
+      ...(item.enabled === undefined ? {} : { enabled: item.enabled }),
       ...(item.displayName === undefined ? {} : { displayName: item.displayName }),
       ...(item.version === undefined ? {} : { version: item.version }),
       description: item.description,
@@ -109,6 +112,14 @@ async function readResponse(response: Response): Promise<unknown> {
 /** Construct the default same-origin skills API, with a fetch seam for tests. */
 export function createDesktopGsSkillsApi(fetcher: FetchLike = globalThis.fetch.bind(globalThis)): DesktopGsSkillsApi {
   return Object.freeze({
+    async setEnabled(name: string, enabled: boolean) {
+      const response = await fetcher(GS_SERVER_SKILLS_PATH, {
+        method: 'POST', credentials: 'same-origin', redirect: 'error', cache: 'no-store',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, enabled }),
+      })
+      return parseGsSkillsView(await readResponse(response))
+    },
     async readSkills() {
       const response = await fetcher(GS_SERVER_SKILLS_PATH, {
         method: 'GET',

@@ -454,7 +454,11 @@ export function apply(ctx: Context, config: Config): void {
         path: GS_SERVER_SKILLS_PATH,
         handler: (req, res) => {
           if (rejectDesktopRequest(ctx, req, res)) return
-          return handleGsSkillsRequest(req, res, rendererOrigin, readGsSkillsView, reportGsError)
+          return handleGsSkillsRequest(req, res, rendererOrigin, readGsSkillsView, reportGsError, async (name, enabled) => {
+            const sync = ctx.get('gsSkillSync')
+            if (sync?.setEnabled === undefined) throw new Error('skill provider unavailable')
+            await sync.setEnabled(name, enabled)
+          })
         },
       }),
       `dsh-plugin-desktop: private gs-server route ${GS_SERVER_SKILLS_PATH}`,

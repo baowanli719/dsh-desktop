@@ -203,12 +203,27 @@ export async function handleGsSkillsRequest(
   // Resolved lazily per request so the route does not depend on plugin load order.
   readSkillsView: () => Promise<GsSkillsView>,
   reportError: ReportError = () => {},
+  setEnabled?: (name: string, enabled: boolean) => Promise<void>,
 ): Promise<void> {
-  if (req.method !== 'GET') return finishJson(res, 405, error('method not allowed'), 'GET')
-  if (!isSameOriginLoopbackRequest(req, expectedOrigin, false)) {
+  if (req.method !== 'GET' && !(req.method === 'POST' && setEnabled !== undefined)) return finishJson(res, 405, error('method not allowed'), 'GET')
+  if (!isSameOriginLoopbackRequest(req, expectedOrigin, req.method === 'POST')) {
     return finishJson(res, 403, error('forbidden'))
   }
   try {
+    if (req.method === 'POST') {
+      const body = await parsePostBody(req, res)
+      if (body === INVALID_BODY) return
+      if (!isRecord(body) || typeof body.name !== 'string' || body.name.length > 256
+        || typeof body.enabled !== 'boolean' || Object.keys(body).some(key => key !== 'name' && key !== 'enabled')) {
+        return finishJson(res, 400, error('invalid skill preference'))
+      }
+      // Refresh visibility before accepting a user choice.
+      const view = await readSkillsView()
+      if (view.status !== 'ok' || view.masterOff || !view.skills.some(skill => skill.name === body.name && skill.available !== false)) {
+        return finishJson(res, 409, error('skill unavailable'))
+      }
+      await setEnabled?.(body.name, body.enabled)
+    }
     finishJson(res, 200, await readSkillsView())
   } catch (cause) {
     reportError('read gs-server skills', cause)

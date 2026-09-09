@@ -17,6 +17,7 @@
  */
 
 import { Buffer } from 'node:buffer'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -160,6 +161,8 @@ export interface GsSkillSyncState {
 export interface GsSkillSyncTracker {
   snapshot(): GsSkillSyncState
   update(state: GsSkillSyncState): void
+  /** Bound by the active provider; renderer writes stay on the Host plane. */
+  setEnabled?(name: string, enabled: boolean): Promise<void>
 }
 
 /** Create the in-memory tracker provided as the `gsSkillSync` service. */
@@ -325,6 +328,7 @@ export class ServerSkillProvider implements SkillProvider {
   /** In-memory remote definitions keyed by session, name, and definition revision. */
   private readonly remoteDefinitions = new Map<string, SkillDefinition>()
   private remoteSessionKey: string | undefined
+  private preferenceRevision = 0
 
   constructor(
     private readonly server: GsSkillServerFace,
@@ -332,6 +336,7 @@ export class ServerSkillProvider implements SkillProvider {
     private readonly control: SkillProviderControl,
     private readonly sync?: GsSkillSyncTracker,
   ) {
+    if (sync !== undefined) sync.setEnabled = (name, enabled) => this.setEnabled(name, enabled)
     this.execution = new GsSkillExecutionClient({
       endpoint: () => server.endpoint(),
       session: server,
@@ -353,6 +358,60 @@ export class ServerSkillProvider implements SkillProvider {
     const userId = this.server.userId()
     if (this.server.accessToken() === undefined || userId === undefined) return undefined
     return `${this.server.endpoint()}#${String(userId)}`
+  }
+
+  private preferencePath(sessionKey: string, name: string): string {
+    const account = createHash('sha256').update(sessionKey).digest('hex')
+    return join(this.options.cacheRoot, 'preferences', account, `${name}.json`)
+  }
+
+  private async enabledFor(sessionKey: string, skill: { name: string, defaultEnabled?: boolean }): Promise<boolean> {
+    try {
+      const value: unknown = JSON.parse(await readFile(this.preferencePath(sessionKey, skill.name), 'utf8'))
+      if (typeof value === 'boolean') return value
+      throw new Error('invalid skill preference')
+    } catch (cause) {
+      // A corrupt or unreadable preference must not take down the whole sync;
+      // fall back to the server default so the rest of the catalog still loads.
+      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.options.logger?.warn(`dsh-plugin-desktop: ignoring unreadable skill preference for ${skill.name}: ${String(cause)}`)
+      }
+      return skill.defaultEnabled !== false
+    }
+  }
+
+  /** Persist a user choice only for a currently delivered, usable skill. */
+  async setEnabled(name: string, enabled: boolean): Promise<void> {
+    const sessionKey = this.sessionKey()
+    const state = this.sync?.snapshot()
+    const skill = state?.skills?.find(item => item.name === name)
+    if (sessionKey === undefined || this.remoteSessionKey !== sessionKey
+      || state?.status !== 'ok' || state.masterOff || !isSkillName(name)
+      || this.server.skillControls()?.SKILLs === 'off' || this.server.skillControls()?.[name] === 'off'
+      || skill === undefined || skill.available === false) throw new Error('skill unavailable')
+    const path = this.preferencePath(sessionKey, name)
+    await mkdir(dirname(path), { recursive: true })
+    const staging = `${path}.${randomUUID()}.tmp`
+    try {
+      await writeFile(staging, JSON.stringify(enabled), 'utf8')
+      await rename(staging, path)
+    } finally {
+      await rm(staging, { force: true })
+    }
+    if (this.sessionKey() !== sessionKey) throw new Error('skill session changed')
+    this.preferenceRevision += 1
+    const current = this.sync?.snapshot()
+    if (current !== undefined) this.sync?.update({
+      ...current,
+      skills: current.skills?.map(item => item.name === name ? { ...item, enabled } : item) ?? [],
+    })
+    this.remoteDefinitions.clear()
+    const catalog = this.options.catalog?.snapshot()
+    if (catalog !== undefined) this.options.catalog?.update({
+      ...catalog,
+      remotes: catalog.remotes.filter(item => item.name !== name),
+    })
+    this.control.invalidate()
   }
 
   /** Drop every remote definition cached under a different session key. */
@@ -417,6 +476,7 @@ export class ServerSkillProvider implements SkillProvider {
     options: SkillLookupOptions,
     sessionKey: string,
   ): Promise<readonly SkillCandidate[]> {
+    const revision = this.preferenceRevision
     let response: GsSkillsResponse
     try {
       response = await this.authorized<GsSkillsResponse>('/api/skills', options.signal)
@@ -438,6 +498,13 @@ export class ServerSkillProvider implements SkillProvider {
         switchedOff += 1
         continue
       }
+      const enabled = await this.enabledFor(sessionKey, skill)
+      synced.push({
+        name: skill.name, displayName: skill.displayName, version: skill.version,
+        description: typeof skill.description === 'string' ? skill.description : '',
+        runtimeType: skill.runtimeType, enabled,
+      })
+      if (!enabled) continue
       candidates.push(this.bundleCandidate(skill.name, skill.version, {
         id: skill.id,
         description: typeof skill.description === 'string' ? skill.description : '',
@@ -447,16 +514,10 @@ export class ServerSkillProvider implements SkillProvider {
           runtimeType: skill.runtimeType,
         },
       }))
-      synced.push({
-        name: skill.name,
-        displayName: skill.displayName,
-        version: skill.version,
-        description: typeof skill.description === 'string' ? skill.description : '',
-        runtimeType: skill.runtimeType,
-      })
       // The legacy catalog sends a numeric id; the report contract requires a string.
       reports.push({ id: String(skill.id), name: skill.name, source: 'server' })
     }
+    if (this.sessionKey() !== sessionKey || revision !== this.preferenceRevision) return []
     this.options.catalog?.update({ supported: false, types: [], remotes: [] })
     this.reportInstalled(reports)
     this.sync?.update({
@@ -481,6 +542,7 @@ export class ServerSkillProvider implements SkillProvider {
     sessionKey: string,
     support: GsSkillExecutionSupport,
   ): Promise<readonly SkillCandidate[]> {
+    const preferenceRevision = this.preferenceRevision
     let response: GsSkillCatalogResponse
     try {
       response = await this.execution.catalog({
@@ -508,7 +570,9 @@ export class ServerSkillProvider implements SkillProvider {
         continue
       }
       const description = typeof skill.description === 'string' ? skill.description : ''
+      const enabled = await this.enabledFor(sessionKey, skill)
       const view = {
+        enabled,
         name: skill.name,
         displayName: skill.displayName,
         version: skill.version,
@@ -520,6 +584,8 @@ export class ServerSkillProvider implements SkillProvider {
         ? skill.runtimeType as GsServerRuntimeType
         : undefined
       if (skill.runtimeType === 'client') {
+        synced.push({ ...view, execution: 'desktop', available: true })
+        if (!enabled) continue
         candidates.push(this.bundleCandidate(skill.name, skill.version, {
           id: skill.name,
           description,
@@ -530,9 +596,10 @@ export class ServerSkillProvider implements SkillProvider {
             execution: 'desktop',
           },
         }))
-        synced.push({ ...view, execution: 'desktop', available: true })
         reports.push({ id: skill.name, name: skill.name, source: 'server' })
       } else if (remoteType !== undefined) {
+        synced.push({ ...view, execution: executionKindOf(remoteType), available: true })
+        if (!enabled) continue
         const revision = typeof skill.definitionRevision === 'string' ? skill.definitionRevision : ''
         candidates.push({
           name: skill.name,
@@ -556,16 +623,16 @@ export class ServerSkillProvider implements SkillProvider {
             definitionRevision: revision,
           },
         })
-        synced.push({ ...view, execution: executionKindOf(remoteType), available: true })
         remotes.push({ name: skill.name, runtimeType: remoteType, definitionRevision: revision })
       } else {
         // Unrecognized or not executable here: visible but never loadable,
         // and never silently demoted to a local bundle.
-        synced.push({ ...view, available: false, unavailableReason: 'runtime-unsupported' })
+        synced.push({ ...view, enabled: false, available: false, unavailableReason: 'runtime-unsupported' })
       }
     }
     // Server-executed skills have no local bundle, so they stay out of the
     // file-installation report; the installed-set semantics are unchanged.
+    if (this.sessionKey() !== sessionKey || preferenceRevision !== this.preferenceRevision) return []
     this.options.catalog?.update({ supported: true, types: support.types, remotes })
     this.reportInstalled(reports)
     this.sync?.update({
@@ -598,9 +665,18 @@ export class ServerSkillProvider implements SkillProvider {
   }
 
   async get(candidate: SkillCandidate, options: SkillLookupOptions): Promise<SkillDefinition | undefined> {
+    const sessionKey = this.sessionKey()
+    const revision = this.preferenceRevision
+    if (sessionKey === undefined || !isSkillName(candidate.name)
+      || this.server.skillControls()?.SKILLs === 'off'
+      || this.server.skillControls()?.[candidate.name] === 'off'
+      || this.sync?.snapshot().skills?.find(item => item.name === candidate.name)?.enabled === false) return undefined
     const remote = asRemoteLocator(candidate.locator)
-    if (remote !== undefined) return this.getRemote(candidate, remote, options)
-    return this.getBundle(candidate, options)
+    const definition = remote !== undefined
+      ? await this.getRemote(candidate, remote, options)
+      : await this.getBundle(candidate, options)
+    if (this.sessionKey() !== sessionKey || revision !== this.preferenceRevision) return undefined
+    return definition
   }
 
   /** Load one server-executed skill's definition; no bundle ever lands on disk. */

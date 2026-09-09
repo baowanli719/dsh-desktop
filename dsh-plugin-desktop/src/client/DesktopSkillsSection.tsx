@@ -40,6 +40,8 @@ export function DesktopSkillsSection({
 }: DesktopSkillsSectionProps) {
   const [skillsView, setSkillsView] = useState<GsSkillsView>()
   const [skillsFailed, setSkillsFailed] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
   const [brand, setBrand] = useState<GsBrandView>()
 
   useEffect(() => {
@@ -75,6 +77,9 @@ export function DesktopSkillsSection({
       <section className="dshDesktopSettingsGroup" aria-labelledby="dsh-desktop-skills-title">
         {skillsFailed && skillsView === undefined && (
           <p className="dshDesktopSettingsError" role="alert">{t('skillsUnavailable')}</p>
+        )}
+        {saveFailed && (
+          <p className="dshDesktopSettingsError" role="alert">{t('skillsSaveFailed')}</p>
         )}
         {!skillsFailed && skillsView === undefined && (
           <p className="dshDesktopSettingsHint">{t('skillsLoading')}</p>
@@ -117,6 +122,21 @@ export function DesktopSkillsSection({
                     </span>
                   )}
                 </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label={skill.displayName ?? skill.name}
+                  checked={skill.enabled !== false}
+                  disabled={saving || skillsView.status !== 'ok' || skillsView.masterOff === true || skill.available === false}
+                  onChange={(event) => {
+                    setSaving(true)
+                    setSaveFailed(false)
+                    void gsSkills.setEnabled(skill.name, event.target.checked)
+                      .then(setSkillsView)
+                      .catch(() => { setSaveFailed(true) })
+                      .finally(() => { setSaving(false) })
+                  }}
+                />
               </div>
             ))}
           </div>

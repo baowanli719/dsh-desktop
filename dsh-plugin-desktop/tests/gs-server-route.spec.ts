@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
-import { handleGsLogoutRequest } from '../src/server/gs-server-route.ts'
+import { handleGsLogoutRequest, handleGsSkillsRequest } from '../src/server/gs-server-route.ts'
 import type GsServerService from '../src/server/gs-server-service.ts'
 
 const ORIGIN = 'http://127.0.0.1:43120'
@@ -63,3 +63,33 @@ describe('gs-server logout route', () => {
   })
 })
 
+
+
+describe('gs-server skill preference route', () => {
+  function skillRequest(body: unknown, origin = ORIGIN) {
+    const req = Readable.from([Buffer.from(JSON.stringify(body))]) as unknown as IncomingMessage
+    Object.assign(req, { method: 'POST', headers: { host: '127.0.0.1:43120', origin, 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' } })
+    return req
+  }
+  const read = async () => ({ status: 'ok' as const, skills: [{ name: 'review', description: '', enabled: false }] })
+  it('updates a visible skill and returns the refreshed view', async () => {
+    const { res } = response()
+    const set = vi.fn(async () => {})
+    await handleGsSkillsRequest(skillRequest({ name: 'review', enabled: true }), res, ORIGIN, read, vi.fn(), set)
+    expect(res.statusCode).toBe(200)
+    expect(set).toHaveBeenCalledWith('review', true)
+  })
+  it('rejects foreign origins, invalid bodies and undelivered skills', async () => {
+    for (const [body, origin, status] of [
+      [{ name: 'review', enabled: true }, 'https://foreign.test', 403],
+      [{ name: 'review', enabled: 'true' }, ORIGIN, 400],
+      [{ name: 'missing', enabled: true }, ORIGIN, 409],
+    ] as const) {
+      const { res } = response()
+      const set = vi.fn(async () => {})
+      await handleGsSkillsRequest(skillRequest(body, origin), res, ORIGIN, read, vi.fn(), set)
+      expect(res.statusCode).toBe(status)
+      expect(set).not.toHaveBeenCalled()
+    }
+  })
+})

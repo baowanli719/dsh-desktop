@@ -232,3 +232,10 @@ NSIS ships the assisted installer (`oneClick: false`, `perMachine: false`, `allo
 - [Server app-update evaluation](../dsh-plugin-desktop/src/server-app-update.ts)
 - [Profile composition gates and assertions](../dsh-plugin-desktop/src/profile.ts)
 - [Desktop architecture](architecture.en.md)
+
+
+### Server skill activation defaults and user choices
+
+Both legacy `/api/skills` and v1 `/api/v1/skills/catalog` entries accept optional `defaultEnabled`: `false` delivers a visible, inactive skill; `true` enables it by default; omission preserves legacy default-on behavior. Silent entries must remain in the authorized server catalog. Do not represent silent delivery using legacy `enabled: false` or ClientConfig `off`, which remain mandatory server restrictions.
+
+The settings page uses private same-origin `POST /api/gs-server/skills` with `{ "name": "skill-name", "enabled": false }`. User choices persist under `<userData>/gs-skills/preferences/<SHA-256 of endpoint and account>/<skill-name>.json`, survive restarts and version changes, and take precedence over subsequent defaults. Disabled skills remain visible but are excluded from model discovery, bundle/definition loading and remote execution. Server authorization and master/per-skill forced-off controls still win. The external gsclaw-server repository must implement the new catalog field; this repository contains only the desktop integration.

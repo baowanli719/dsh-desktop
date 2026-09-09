@@ -1,4 +1,5 @@
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -334,6 +335,7 @@ describe('ServerSkillProvider sync tracking', () => {
     expect(state.status).toBe('ok')
     expect(state.syncedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u)
     expect(state.skills).toEqual([{
+      enabled: true,
       name: 'code-review',
       displayName: 'Code Review',
       version: '1.0.0',
@@ -735,4 +737,94 @@ describe('ServerSkillProvider remote definitions', () => {
     await expect(harness.provider.get(remoteCandidate(), {})).resolves.toBeUndefined()
     expect(harness.calls).toHaveLength(0)
   })
+})
+
+
+describe('server skill activation preferences', () => {
+  it('keeps silent legacy deliveries visible and preserves user choices across restarts and accounts', async () => {
+    const cache = temporaryCacheRoot()
+    let defaultEnabled = false
+    const handler = () => skillsResponse([skill({ defaultEnabled })])
+    const first = createProvider(handler, cache)
+    expect(await first.provider.list({})).toEqual([])
+    expect(first.sync.snapshot().skills).toEqual([expect.objectContaining({ name: 'code-review', enabled: false })])
+    await first.provider.setEnabled('code-review', true)
+    expect(await first.provider.list({})).toHaveLength(1)
+    await first.provider.setEnabled('code-review', false)
+    defaultEnabled = true
+    const restarted = createProvider(handler, cache)
+    expect(await restarted.provider.list({})).toEqual([])
+    restarted.setUserId(2)
+    expect(await restarted.provider.list({})).toHaveLength(1)
+    restarted.setUserId(1)
+    expect(await restarted.provider.list({})).toEqual([])
+    await restarted.provider.setEnabled('code-review', true)
+    restarted.controls.current = { 'code-review': 'off' }
+    expect(await restarted.provider.list({})).toEqual([])
+    await expect(restarted.provider.setEnabled('code-review', true)).rejects.toThrow('skill unavailable')
+  })
+
+  it('keeps disabled remote skills out of the execution bridge and refuses stale loads', async () => {
+    const harness = v1Harness([catalogEntry({ defaultEnabled: false })])
+    expect(await harness.provider.list({})).toEqual([])
+    expect(harness.catalog.snapshot().remotes).toEqual([])
+    await harness.provider.setEnabled('customer-analysis', true)
+    const [candidate] = await harness.provider.list({})
+    expect(harness.catalog.snapshot().remotes).toHaveLength(1)
+    await harness.provider.setEnabled('customer-analysis', false)
+    expect(harness.catalog.snapshot().remotes).toEqual([])
+    await expect(harness.provider.get(candidate!, {})).resolves.toBeUndefined()
+    expect(await harness.provider.list({})).toEqual([])
+    expect(harness.sync.snapshot().skills).toEqual([expect.objectContaining({ enabled: false, available: true })])
+  })
+
+  it('does not fetch bundles or definitions for silently delivered v1 skills', async () => {
+    const harness = v1Harness([
+      catalogEntry({ name: 'local-report', runtimeType: 'client', defaultEnabled: false }),
+      catalogEntry({ defaultEnabled: false }),
+    ])
+    expect(await harness.provider.list({})).toEqual([])
+    expect(harness.sync.snapshot().skills).toHaveLength(2)
+    expect(harness.calls.some(call => /\/(files|definition)$/.test(call.url))).toBe(false)
+    await expect(harness.provider.setEnabled('../escape', true)).rejects.toThrow()
+    harness.setToken(undefined)
+    await expect(harness.provider.setEnabled('customer-analysis', true)).rejects.toThrow()
+  })
+
+  it('falls back to the server default when a saved preference is corrupt', async () => {
+    const cache = temporaryCacheRoot()
+    const account = createHash('sha256').update(`${ENDPOINT}#1`).digest('hex')
+    const dir = join(cache, 'preferences', account)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'code-review.json'), 'not-json', 'utf8')
+    const harness = createProvider(() => skillsResponse([skill({ defaultEnabled: false })]), cache)
+    expect(await harness.provider.list({})).toEqual([])
+    expect(harness.sync.snapshot().skills).toEqual([expect.objectContaining({ name: 'code-review', enabled: false })])
+    expect(harness.sync.snapshot().status).toBe('ok')
+    expect(harness.loggerWarn).toHaveBeenCalled()
+    writeFileSync(join(dir, 'code-review.json'), 'true', 'utf8')
+    expect(await harness.provider.list({})).toHaveLength(1)
+  })
+})
+
+
+it('discards a catalog response that arrives after the user disables a skill', async () => {
+  let delayed = false
+  let release: (response: Response) => void = () => {}
+  const harness = createProvider(call => {
+    if (call.url.endsWith('/api/v1/meta')) return metaResponse({ types: ['data-query'] })
+    if (call.url.endsWith('/api/v1/skills/catalog')) {
+      return delayed ? new Promise<Response>(resolve => { release = resolve }) : catalogResponse([catalogEntry()])
+    }
+    return Response.json({ ok: true })
+  })
+  await harness.provider.list({})
+  delayed = true
+  const pending = harness.provider.list({})
+  await vi.waitFor(() => expect(harness.calls.filter(call => call.url.endsWith('/catalog'))).toHaveLength(2))
+  await harness.provider.setEnabled('customer-analysis', false)
+  release(catalogResponse([catalogEntry()]))
+  expect(await pending).toEqual([])
+  expect(harness.catalog.snapshot().remotes).toEqual([])
+  expect(harness.sync.snapshot().skills?.[0]?.enabled).toBe(false)
 })

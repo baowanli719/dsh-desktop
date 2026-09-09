@@ -172,6 +172,8 @@ export interface GsClientConfigResponse {
 
 /** One skill summary from `GET /api/skills`; the server only sends enabled skills. */
 export interface GsServerSkill {
+  /** Initial activation; false delivers visibly without enabling. User choice wins. */
+  readonly defaultEnabled?: boolean
   readonly id: string
   readonly name: string
   readonly displayName: string
@@ -220,6 +222,8 @@ export type GsServerRuntimeType = (typeof GS_SERVER_RUNTIME_TYPES)[number]
 
 /** One skill summary from `GET /api/v1/skills/catalog`; the server pre-filters visibility. */
 export interface GsSkillCatalogEntry {
+  /** Initial activation; omitted preserves legacy default-on behavior. */
+  readonly defaultEnabled?: boolean
   readonly name: string
   readonly displayName: string
   readonly description: string
@@ -373,6 +377,8 @@ export type GsSkillExecutionKind = 'desktop' | 'server-data-query' | 'server-mcp
 
 /** Renderer-safe view of one server-delivered skill. */
 export interface GsSkillViewItem {
+  /** Effective activation after the account-local user choice. */
+  readonly enabled?: boolean
   readonly name: string
   readonly displayName?: string
   readonly version?: string

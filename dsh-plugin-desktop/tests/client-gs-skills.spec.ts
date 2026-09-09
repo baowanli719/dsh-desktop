@@ -161,3 +161,14 @@ describe('createDesktopGsSkillsApi', () => {
     await expect(malformed.readSkills()).rejects.toThrow('gs-server skills response was not JSON')
   })
 })
+
+
+it('writes an activation choice through the private same-origin route', async () => {
+  const view = { status: 'ok', skills: [{ name: 'review', description: '', enabled: false }] }
+  const fetcher = vi.fn(async () => jsonResponse(200, view))
+  await expect(createDesktopGsSkillsApi(fetcher).setEnabled('review', false)).resolves.toEqual(view)
+  expect(fetcher).toHaveBeenCalledWith(desktopGsSkillsPaths.skills, expect.objectContaining({
+    method: 'POST', credentials: 'same-origin', redirect: 'error', body: JSON.stringify({ name: 'review', enabled: false }),
+  }))
+  expect(() => parseGsSkillsView({ ...view, skills: [{ name: 'review', description: '', enabled: 'false' }] })).toThrow()
+})
