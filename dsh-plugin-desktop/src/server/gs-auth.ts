@@ -39,6 +39,15 @@ export const MAX_GS_REFRESH_TOKEN_BYTES = 8 * 1024
 const PRIVATE_DIRECTORY_MODE = 0o700
 const PRIVATE_FILE_MODE = 0o600
 
+/** Resend/expire windows beyond one hour are millisecond payloads, not seconds. */
+const EMAIL_CODE_SECONDS_CEILING = 3600
+
+/** Coerce one send-code window to whole seconds; oversized values are milliseconds. */
+export function emailCodeWindowSeconds(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0
+  return Math.ceil(value > EMAIL_CODE_SECONDS_CEILING ? value / 1000 : value)
+}
+
 /** OS-backed secret storage seam; the module itself stays headless-testable. */
 export interface GsSafeStorage {
   /** Whether encryption is backed by the OS keychain rather than plaintext. */
@@ -196,14 +205,19 @@ export class GsAuthService implements GsSessionTokenSource {
   }
 
   /** Send one email verification code to the account's registered address. */
-  sendEmailCode(account: string): Promise<GsEmailCodeResponse> {
-    return gsJsonRequest<GsEmailCodeResponse>({
+  async sendEmailCode(account: string): Promise<GsEmailCodeResponse> {
+    const response = await gsJsonRequest<GsEmailCodeResponse>({
       endpoint: this.options.endpoint(),
       method: 'POST',
       path: '/api/auth/email/send-code',
       body: { account },
       ...(this.options.request === undefined ? {} : { request: this.options.request }),
     })
+    return {
+      ...response,
+      expiresIn: emailCodeWindowSeconds(response.expiresIn),
+      resendIn: emailCodeWindowSeconds(response.resendIn),
+    }
   }
 
   /** Email-code login; the success shape matches password login. */

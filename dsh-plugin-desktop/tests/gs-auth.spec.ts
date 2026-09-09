@@ -203,6 +203,33 @@ describe('gsclaw-server auth state machine', () => {
     await expect(readFile(join(root, GS_REFRESH_TOKEN_FILENAME), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('sends an email code and coerces millisecond windows to seconds', async () => {
+    const root = await userData()
+    const calls: Call[] = []
+    const request: GsRequest = async (url, init) => {
+      calls.push({ url, init })
+      return Response.json({ ok: true, maskedEmail: 'b***@gszq.com', expiresIn: 300000, resendIn: 60000 })
+    }
+    const auth = makeAuth(root, request)
+
+    const response = await auth.sendEmailCode('alice')
+
+    expect(calls[0]?.url).toBe(`${ENDPOINT}/api/auth/email/send-code`)
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ account: 'alice' })
+    expect(response).toEqual({ ok: true, maskedEmail: 'b***@gszq.com', expiresIn: 300, resendIn: 60 })
+  })
+
+  it('keeps already-second email code windows untouched', async () => {
+    const root = await userData()
+    const request: GsRequest = async () =>
+      Response.json({ ok: true, maskedEmail: 'b***@gszq.com', expiresIn: 300, resendIn: 60 })
+    const auth = makeAuth(root, request)
+
+    const response = await auth.sendEmailCode('alice')
+
+    expect(response).toEqual({ ok: true, maskedEmail: 'b***@gszq.com', expiresIn: 300, resendIn: 60 })
+  })
+
   it('restores nothing without a persisted refresh token', async () => {
     const root = await userData()
     const request = vi.fn(async () => Response.json({}))
