@@ -145,7 +145,7 @@ describe('input-trigger client patch: all-empty menu keeps the empty hint', () =
 
 describe('input-trigger client patch content', () => {
   const patch = readFileSync(new URL(
-    '../../patches/dsh-client-ui-input-trigger@0.1.2-rc.1.patch',
+    '../../patches/dsh-client-ui-input-trigger@0.1.5-rc.1.patch',
     import.meta.url,
   ), 'utf8')
   const installed = readFileSync(

@@ -173,7 +173,12 @@ describe('exportDiagnosticsZip', () => {
     mkdirSync(lifecycleDir)
     writeFileSync(join(logs, 'dsh-2026-08-16.log'), 'owned\n')
     writeFileSync(target, 'bad\n')
-    symlinkSync(target, join(lifecycleDir, 'startup.jsonl'), 'file')
+    try {
+      symlinkSync(target, join(lifecycleDir, 'startup.jsonl'), 'file')
+    } catch {
+      // Windows without Developer Mode cannot create file symlinks.
+      return
+    }
 
     const out = await exportDiagnosticsZip(logs, root, {
       appVersion: APP_VERSION,

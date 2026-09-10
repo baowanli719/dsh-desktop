@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   DesktopDialogToneIcon,
@@ -26,6 +27,12 @@ describe('Desktop dialog native UI', () => {
       '2. Second',
       'Recommendation',
     ])
+  })
+
+  it('uses the shared ScrollArea for long default dialog details', () => {
+    const source = readFileSync(new URL('../src/native-ui/desktop-dialog/App.tsx', import.meta.url), 'utf8')
+    expect(source).toContain('<ScrollArea className="mt-2 h-28 pr-3">')
+    expect(source).not.toContain('max-h-28 overflow-auto')
   })
 
 })

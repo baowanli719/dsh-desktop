@@ -15,7 +15,7 @@ import {
 import type { Stats } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { compareSemVerVersions, parseSemVer } from './update-checker.ts'
+import { parseSemVer } from './update-checker.ts'
 
 const BIN_NAME = 'dsh-plugin-desktop'
 const LEGACY_STATE_VERSION = 1
@@ -264,24 +264,13 @@ export function readDesktopSetupWizardState(
   return parseState(text, desktopSetupWizardProfileHash(profileDir))
 }
 
-/**
- * Decide whether the current installation needs the existing complete Wizard.
- * Any forward version or revision change requires it. Equal versions and pure
- * rollbacks do not rewrite the newer marker.
- */
+/** Setup is a one-time Profile decision; recorded versions are diagnostic only. */
 export function desktopSetupWizardRequired(
   state: DesktopSetupWizardState | undefined,
   currentVersions: DesktopSetupWizardVersions,
 ): boolean {
-  const current = normalizedVersions(currentVersions)
-  if (state === undefined || state.version === LEGACY_STATE_VERSION) return true
-  const desktop = compareSemVerVersions(current.desktopVersion, state.desktopVersion)
-  const dsh = compareSemVerVersions(current.dshVersion, state.dshVersion)
-  if (desktop === null || dsh === null) {
-    throw new Error(`${BIN_NAME}: validated Setup Wizard versions could not be compared`)
-  }
-  const revision = current.setupRevision - state.setupRevision
-  return desktop > 0 || dsh > 0 || revision > 0
+  normalizedVersions(currentVersions)
+  return state === undefined
 }
 
 /** Atomically record explicit completion or an explicit skip for one Profile. */

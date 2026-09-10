@@ -52,7 +52,7 @@ const notifications = Object.freeze({
 
 function input(overrides: Partial<DesktopSetupWizardInput> = {}): DesktopSetupWizardInput {
   return {
-    appVersion: '2.0.5-beta.2',
+    appVersion: '2.0.6-beta.1',
     profileName: 'work',
     platform: 'win32',
     micaSupported: true,
@@ -61,7 +61,8 @@ function input(overrides: Partial<DesktopSetupWizardInput> = {}): DesktopSetupWi
     windowsMaterial: 'mica',
     openBrowser: true,
     networkExposure: 'loopback',
-    market: 'community-market',
+    aaEnabled: false,
+  market: 'community-market',
     notifications,
     ...overrides,
   }
@@ -75,6 +76,7 @@ function completeUrl(selection: DesktopSetupWizardSelection = input()): string {
   url.searchParams.set('openBrowser', String(selection.openBrowser))
   url.searchParams.set('networkExposure', selection.networkExposure)
   url.searchParams.set('market', selection.market)
+  url.searchParams.set('aaEnabled', String(selection.aaEnabled === true))
   url.searchParams.set('notificationsEnabled', String(selection.notifications.enabled))
   url.searchParams.set('notifyOnTurnCompletion', String(selection.notifications.notifyOnTurnCompletion))
   url.searchParams.set('notifyOnTurnFailure', String(selection.notifications.notifyOnTurnFailure))
@@ -100,7 +102,8 @@ describe('Desktop Setup Wizard action parser', () => {
         windowsMaterial: 'mica',
         openBrowser: true,
         networkExposure: 'loopback',
-        market: 'community-market',
+        aaEnabled: false,
+  market: 'community-market',
         notifications,
       },
     })
@@ -195,6 +198,7 @@ describe('DesktopSetupWizardWindow', () => {
       windowsMaterial: source.windowsMaterial,
       openBrowser: source.openBrowser,
       networkExposure: source.networkExposure,
+      aaEnabled: false,
       market: source.market,
       notifications: source.notifications,
     }

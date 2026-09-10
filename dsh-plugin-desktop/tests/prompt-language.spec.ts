@@ -12,7 +12,7 @@ afterEach(async () => {
 
 async function setup() {
   const ctx = new Context()
-  const system = await ctx.plugin(SystemPrompt, { persona: '办公助理' })
+  const system = await ctx.plugin(SystemPrompt, { personaPrefix: '办公助理' })
   const plugin = await ctx.plugin(language)
   disposals.push(async () => { await plugin.dispose(); await system.dispose() })
   // Pre-step dispatch only needs a stable scope identity, not a running model.

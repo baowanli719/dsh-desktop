@@ -82,36 +82,37 @@ describe('desktop update installer download', () => {
   it('pins a Beta artifact request to its channel and target version', async () => {
     const directory = await temporaryDirectory()
     const artifact = dmgArtifact()
-    const destination = join(directory, 'DSH-Desktop-Beta-2.0.5-beta.2-mac.dmg')
+    const destination = join(directory, 'DSH-Desktop-Beta-2.0.6-beta.1-mac.dmg')
     const result = await downloadDesktopUpdate({
       platform: 'darwin',
-      version: '2.0.5-beta.2',
+      version: '2.0.6-beta.1',
       channel: 'beta',
       destinationPath: destination,
       request: async (_url, init) => {
         const headers = new Headers(init.headers)
         expect(headers.get(DESKTOP_RELEASE_CHANNEL_HEADER)).toBe('beta')
-        expect(headers.get(DESKTOP_TARGET_VERSION_HEADER)).toBe('2.0.5-beta.2')
+    expect(headers.get(DESKTOP_TARGET_VERSION_HEADER)).toBe('2.0.6-beta.1')
         return chunkedResponse([artifact], {
           [DESKTOP_RELEASE_CHANNEL_HEADER]: 'beta',
-          [DESKTOP_TARGET_VERSION_HEADER]: '2.0.5-beta.2',
+      [DESKTOP_TARGET_VERSION_HEADER]: '2.0.6-beta.1',
         })
       },
     })
     expect(result).toBe(destination)
-    expect(desktopUpdateFilename('darwin', '2.0.5-beta.2', 'beta'))
-      .toBe('DSH-Desktop-Beta-2.0.5-beta.2-mac.dmg')
+    expect(desktopUpdateFilename('darwin', '2.0.6-beta.1', 'beta'))
+      .toBe('DSH-Desktop-Beta-2.0.6-beta.1-mac.dmg')
   })
 
-  it('rejects a Beta artifact without matching response identity', async () => {
+  it('accepts a Beta artifact without response identity headers', async () => {
     const directory = await temporaryDirectory()
-    await expectFailure(downloadDesktopUpdate({
+    const result = await downloadDesktopUpdate({
       platform: 'darwin',
-      version: '2.0.5-beta.2',
+      version: '2.0.6-beta.1',
       channel: 'beta',
-      destinationPath: join(directory, 'DSH-Desktop-Beta-2.0.5-beta.2-mac.dmg'),
+      destinationPath: join(directory, 'DSH-Desktop-Beta-2.0.6-beta.1-mac.dmg'),
       request: async () => chunkedResponse([dmgArtifact()]),
-    }), 'invalid-artifact')
+    })
+    expect(result).toBe(join(directory, 'DSH-Desktop-Beta-2.0.6-beta.1-mac.dmg'))
   })
 
   it('streams a macOS DMG from only the fixed endpoint and atomically completes it', async () => {

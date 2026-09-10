@@ -4,6 +4,7 @@ const SETTINGS_PATH = '/api/desktop/settings'
 const PROFILE_CREATE_PATH = '/api/desktop/profiles/create'
 const PROFILE_SELECT_PATH = '/api/desktop/profiles/select'
 const PROFILE_DELETE_PATH = '/api/desktop/profiles/delete'
+const AA_SELECT_PATH = '/api/desktop/aa/select'
 const MARKET_SELECT_PATH = '/api/desktop/market/select'
 const TERMINAL_OPEN_PATH = '/api/desktop/terminal/open'
 const RESTART_PATH = '/api/desktop/restart'
@@ -57,6 +58,7 @@ export interface DesktopWebView {
 export interface DesktopSettingsView {
   readonly current: string
   readonly profiles: readonly DesktopProfileView[]
+  readonly aa?: { readonly requested: boolean; readonly effective: boolean }
   readonly market: DesktopMarketView
   readonly web: DesktopWebView
 }
@@ -73,6 +75,7 @@ export interface DesktopSettingsApi {
   createProfile(name: string): Promise<DesktopSettingsView>
   selectProfile(name: string): Promise<DesktopRestartAcceptance>
   deleteProfile(name: string): Promise<DesktopSettingsView>
+  selectAa?(enabled: boolean): Promise<DesktopRestartAcceptance>
   selectMarket(provider: DesktopMarketProvider): Promise<DesktopRestartAcceptance>
   openTerminal(): Promise<void>
   restart(): Promise<void>
@@ -202,6 +205,7 @@ export function parseDesktopSettingsView(value: unknown): DesktopSettingsView {
     || value.current.length > MAX_PROFILE_NAME_LENGTH
     || !Array.isArray(value.profiles)
     || value.profiles.length > MAX_PROFILES
+    || (value.aa !== undefined && (!isObject(value.aa) || typeof value.aa.requested !== 'boolean' || typeof value.aa.effective !== 'boolean'))
     || !isObject(value.market)
     || !isMarketProvider(value.market.requested)
     || !isMarketProvider(value.market.effective)
@@ -243,6 +247,7 @@ export function parseDesktopSettingsView(value: unknown): DesktopSettingsView {
   return Object.freeze({
     current: value.current,
     profiles: Object.freeze(profiles),
+    aa: Object.freeze(isObject(value.aa) ? { requested: value.aa.requested as boolean, effective: value.aa.effective as boolean } : { requested: false, effective: false }),
     market: Object.freeze({
       requested: value.market.requested,
       effective: value.market.effective,
@@ -321,6 +326,9 @@ export function createDesktopSettingsApi(fetcher: FetchLike = globalThis.fetch.b
     },
     async deleteProfile(name: string) {
       return parseDesktopSettingsView(await readResponse(await post(fetcher, PROFILE_DELETE_PATH, { name })))
+    },
+    async selectAa(enabled: boolean) {
+      return parseDesktopRestartAcceptance(await readResponse(await post(fetcher, AA_SELECT_PATH, { enabled })))
     },
     async selectMarket(provider: DesktopMarketProvider) {
       return parseDesktopRestartAcceptance(await readResponse(await post(fetcher, MARKET_SELECT_PATH, { provider })))

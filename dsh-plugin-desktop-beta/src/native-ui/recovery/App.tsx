@@ -4,6 +4,8 @@ import {
   CircleHelp,
   FilePenLine,
   FolderOpen,
+  FolderInput,
+  HardDrive,
   History,
   LifeBuoy,
   PackageX,
@@ -14,10 +16,12 @@ import {
   ShieldCheck,
   Stethoscope,
   Terminal,
+  Trash2,
   Users,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.tsx'
+import { Button } from '../components/ui/button.tsx'
 import {
   Card,
   CardContent,
@@ -26,6 +30,8 @@ import {
   CardHeader,
   CardTitle,
 } from '../components/ui/card.tsx'
+import { Input } from '../components/ui/input.tsx'
+import { Label } from '../components/ui/label.tsx'
 import { ScrollArea } from '../components/ui/scroll-area.tsx'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs.tsx'
 import { cn } from '../lib/utils.ts'
@@ -88,6 +94,13 @@ interface RecoveryState {
   readonly restartReady: boolean
   readonly activeTab: DesktopRecoveryTab
   readonly configurationAvailable: boolean
+  readonly profileDirectory?: string
+  readonly dataDirectory?: {
+    readonly currentDirectory: string
+    readonly usingDefaultDirectory: boolean
+    readonly editing: boolean
+    readonly draftDirectory?: string
+  }
   readonly profiles?: readonly RecoveryProfile[]
   readonly profileActionToken?: string
   readonly terminalAvailable?: boolean
@@ -114,23 +127,25 @@ function fallbackLocale(): DesktopLocale {
   return new URLSearchParams(window.location.search).get('locale') === 'zh' ? 'zh' : 'en'
 }
 
-function href(action: string, id?: string, name?: string): string {
+function href(action: string, id?: string, name?: string, path?: string): string {
   const url = new URL(`${SCHEME}//${action}`)
   if (id !== undefined) url.searchParams.set('id', id)
   if (name !== undefined) url.searchParams.set('name', name)
+  if (path !== undefined) url.searchParams.set('path', path)
   return url.href
 }
 
-function Action({ action, children, className, icon, id, name, variant = 'outline' }: {
+function Action({ action, children, className, icon, id, name, path, variant = 'outline' }: {
   readonly action: string
   readonly children: ReactNode
   readonly className?: string
   readonly icon?: ReactNode
   readonly id?: string
   readonly name?: string
+  readonly path?: string
   readonly variant?: RecoveryActionVariant
 }): JSX.Element {
-  return <RecoveryActionLink className={className} href={href(action, id, name)} icon={icon} variant={variant}>{children}</RecoveryActionLink>
+  return <RecoveryActionLink className={className} href={href(action, id, name, path)} icon={icon} variant={variant}>{children}</RecoveryActionLink>
 }
 
 function PanelScroll({ children }: { readonly children: ReactNode }): JSX.Element {
@@ -177,8 +192,48 @@ function ProfilesPanel({ copy, state }: { readonly copy: DesktopRecoveryCopy; re
   return <PanelScroll><DesktopProfileSelector profiles={state.profiles} labels={{ title: copy.profiles, description: copy.profilesBody, current: copy.currentProfile, select: copy.switchProfile, empty: copy.profilesEmpty, create: copy.addProfile }} selectHref={name => state.profileActionToken === undefined ? undefined : href('switch-profile', state.profileActionToken, name)} {...(state.profileCreatorAvailable ? { createHref: href('open-profile-creator') } : {})} /></PanelScroll>
 }
 
+function RecoveryGuideCard({ body, icon, title }: {
+  readonly body: string
+  readonly icon: ReactNode
+  readonly title: string
+}): JSX.Element {
+  return <Card><CardHeader><CardTitle className="flex items-center gap-2">{icon}{title}</CardTitle><CardDescription>{body}</CardDescription></CardHeader></Card>
+}
+
 function QuickRecoveryPanel({ copy, state }: { readonly copy: DesktopRecoveryCopy; readonly state: RecoveryState }): JSX.Element {
-  return <PanelScroll><Card><CardHeader><CardTitle className="flex items-center gap-2"><CircleHelp className="size-5" />{copy.quickRecovery}</CardTitle><CardDescription>{copy.quickRecoveryBody}</CardDescription></CardHeader></Card><Card><CardHeader><CardTitle className="flex items-center gap-2"><Users className="size-5" />{copy.profileGuide}</CardTitle><CardDescription>{copy.profileGuideBody}</CardDescription></CardHeader></Card><SafeModePanel copy={copy} state={state} /></PanelScroll>
+  return <PanelScroll>
+    <Card><CardHeader><CardTitle className="flex items-center gap-2"><CircleHelp className="size-5" />{copy.quickRecovery}</CardTitle><CardDescription>{copy.quickRecoveryBody}</CardDescription></CardHeader></Card>
+    <SafeModePanel copy={copy} state={state} />
+    <RecoveryGuideCard body={copy.pluginGuideBody} icon={<Plug className="size-5" />} title={copy.plugins} />
+    <RecoveryGuideCard body={copy.rollbackGuideBody} icon={<History className="size-5" />} title={copy.tabs.rollback} />
+    <RecoveryGuideCard body={copy.profileSwitchGuideBody} icon={<Users className="size-5" />} title={copy.tabs.profiles} />
+    <RecoveryGuideCard body={copy.dataGuideBody} icon={<HardDrive className="size-5" />} title={copy.tabs.data} />
+    <RecoveryGuideCard body={copy.diagnosticsGuideBody} icon={<Stethoscope className="size-5" />} title={copy.tabs.diagnostics} />
+  </PanelScroll>
+}
+
+function DataDirectoryEditor({ copy, state }: {
+  readonly copy: DesktopRecoveryCopy
+  readonly state: NonNullable<RecoveryState['dataDirectory']>
+}): JSX.Element {
+  const [directory, setDirectory] = useState(state.draftDirectory ?? '')
+  const apply = (): void => {
+    const target = directory.trim()
+    if (target.length > 0) window.location.assign(href('apply-data-directory', undefined, undefined, target))
+  }
+  return <div className="space-y-3 border-t px-6 py-5">
+    <div className="space-y-2"><Label htmlFor="data-directory-path">{copy.dataDirectoryPath}</Label><div className="flex flex-col gap-2 sm:flex-row"><Input autoFocus id="data-directory-path" maxLength={32_768} onChange={event => { setDirectory(event.target.value) }} onKeyDown={event => { if (event.key === 'Enter') apply() }} placeholder={copy.dataDirectoryPlaceholder} value={directory} /><Button onClick={() => { window.location.assign(href('browse-data-directory')) }} type="button" variant="outline"><FolderOpen />{copy.browse}</Button></div></div>
+    <div className="flex flex-wrap justify-end gap-2"><Button onClick={() => { window.location.assign(href('cancel-change-data-directory')) }} type="button" variant="outline">{copy.cancelDataDirectoryChange}</Button><Button disabled={directory.trim().length === 0} onClick={apply} type="button"><FolderInput />{copy.applyDataDirectory}</Button></div>
+  </div>
+}
+
+function DataManagementPanel({ copy, state }: { readonly copy: DesktopRecoveryCopy; readonly state: RecoveryState }): JSX.Element {
+  const data = state.dataDirectory
+  if (data === undefined) return <PanelScroll><Alert><HardDrive /><AlertTitle>{copy.resetAndDataManagement}</AlertTitle><AlertDescription>{copy.dataDirectoryUnavailable}</AlertDescription></Alert></PanelScroll>
+  return <PanelScroll>
+    <Card><CardHeader><CardTitle className="flex items-center gap-2"><HardDrive className="size-5" />{copy.dataManagement}</CardTitle><CardDescription>{copy.dataManagementBody}</CardDescription></CardHeader><CardContent><p className="mb-2 text-xs text-muted-foreground">{copy.currentDataDirectory}</p><code className="block select-text break-all rounded-lg bg-muted p-3 text-xs">{data.currentDirectory}</code></CardContent>{data.editing ? <DataDirectoryEditor copy={copy} state={data} /> : <CardFooter className="flex-wrap justify-end gap-2">{data.usingDefaultDirectory ? null : <Action action="restore-default-data-directory" icon={<RotateCcw />}>{copy.restoreDefaultDataDirectory}</Action>}<Action action="begin-change-data-directory" icon={<FolderInput />} variant="default">{copy.changeDataDirectory}</Action></CardFooter>}</Card>
+    <Card className="border-destructive/40"><CardHeader><CardTitle className="flex items-center gap-2 text-destructive"><Trash2 className="size-5" />{copy.factoryReset}</CardTitle><CardDescription>{copy.factoryResetBody}</CardDescription></CardHeader><CardFooter className="justify-end"><Action action="factory-reset" icon={<Trash2 />} variant="destructive">{copy.factoryResetAction}</Action></CardFooter></Card>
+  </PanelScroll>
 }
 
 function DiagnosticsPanel({ copy, state }: { readonly copy: DesktopRecoveryCopy; readonly state: RecoveryState }): JSX.Element {
@@ -186,7 +241,7 @@ function DiagnosticsPanel({ copy, state }: { readonly copy: DesktopRecoveryCopy;
 }
 
 function Reason({ copy, state }: { readonly copy: DesktopRecoveryCopy; readonly state: RecoveryState }): JSX.Element {
-  return <Card className={cn('shrink-0', state.requested === true ? 'border-border' : 'border-amber-500/50')}><CardContent className="flex gap-4 p-4"><div className="mt-0.5 shrink-0">{state.requested === true ? <LifeBuoy className="size-5 text-muted-foreground" /> : <AlertTriangle className="size-5 text-amber-500" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><h2 className="text-sm font-semibold">{copy.reason}</h2>{state.snapshot === undefined ? null : <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">{copy.currentProfile}: {state.snapshot.profileName}</span>}</div>{state.requested === true ? <><p className="mt-1 text-sm font-medium">{copy.requestedMode}</p><p className="mt-1 text-sm text-muted-foreground">{copy.requestedBody}</p></> : <><p className="mt-1 text-xs text-muted-foreground">{copy.failureStage}: {copy.stageLabels[state.failureStage]}</p><pre className="mt-2 max-h-20 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-2.5 text-xs leading-relaxed">{state.failureDetail}</pre></>}</div></CardContent></Card>
+  return <Card className={cn('shrink-0', state.requested === true ? 'border-border' : 'border-amber-500/50')}><CardContent className="flex gap-4 p-4"><div className="mt-0.5 shrink-0">{state.requested === true ? <LifeBuoy className="size-5 text-muted-foreground" /> : <AlertTriangle className="size-5 text-amber-500" />}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><h2 className="text-sm font-semibold">{copy.reason}</h2>{state.snapshot === undefined ? null : <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">{copy.currentProfile}: {state.snapshot.profileName}</span>}{state.profileDirectory === undefined ? null : <span className="inline-flex min-w-0 max-w-full items-center rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground"><span className="shrink-0">{copy.currentProfileDirectory}:&nbsp;</span><code className="truncate select-text" title={state.profileDirectory}>{state.profileDirectory}</code></span>}</div>{state.requested === true ? <><p className="mt-1 text-sm font-medium">{copy.requestedMode}</p><p className="mt-1 text-sm text-muted-foreground">{copy.requestedBody}</p></> : <><p className="mt-1 text-xs text-muted-foreground">{copy.failureStage}: {copy.stageLabels[state.failureStage]}</p><pre className="mt-2 max-h-20 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-2.5 text-xs leading-relaxed">{state.failureDetail}</pre></>}</div></CardContent></Card>
 }
 
 /** Keep the recovery terminal pill opposite the platform's native controls. */
@@ -204,5 +259,5 @@ export function RecoveryApp(): JSX.Element {
     return <><DesktopFrame /><main className="dshNativeContent flex h-screen items-center justify-center p-6"><Alert variant="destructive"><AlertTriangle /><AlertTitle>{copy.title}</AlertTitle><AlertDescription>{copy.fallbackBody}</AlertDescription></Alert></main></>
   }
   const copy = desktopRecoveryCopy(state.locale)
-  return <><DesktopFrame />{state.terminalAvailable ? <RecoveryTerminalAction busy={state.busy} copy={copy} search={window.location.search} /> : null}<main className={cn('dshNativeContent h-screen overflow-hidden p-5 sm:p-6', state.busy && 'pointer-events-none opacity-70')}><div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4"><Reason copy={copy} state={state} /><Tabs defaultValue={state.activeTab}><TabsList className="w-full justify-start overflow-x-auto"><TabsTrigger value="quick"><LifeBuoy />{copy.tabs.quick}</TabsTrigger><TabsTrigger value="plugins"><Plug />{copy.tabs.plugins}</TabsTrigger><TabsTrigger value="rollback"><History />{copy.tabs.rollback}</TabsTrigger><TabsTrigger value="profiles"><Users />{copy.tabs.profiles}</TabsTrigger><TabsTrigger value="diagnostics"><Stethoscope />{copy.tabs.diagnostics}</TabsTrigger></TabsList><TabsContent value="quick"><QuickRecoveryPanel copy={copy} state={state} /></TabsContent><TabsContent value="plugins"><PluginsPanel copy={copy} state={state} /></TabsContent><TabsContent value="rollback"><RollbackPanel copy={copy} state={state} /></TabsContent><TabsContent value="profiles"><ProfilesPanel copy={copy} state={state} /></TabsContent><TabsContent value="diagnostics"><DiagnosticsPanel copy={copy} state={state} /></TabsContent></Tabs><RecoveryActionFooter leading={state.busy ? <span className="inline-flex items-center gap-2 text-sm text-muted-foreground"><RefreshCw className="size-4 animate-spin" />{copy.working}</span> : undefined}><Action action="restart" icon={<RotateCcw />} variant={state.restartReady ? 'default' : 'outline'}>{copy.restart}</Action><Action action="quit" icon={<Power />}>{copy.quit}</Action></RecoveryActionFooter></div></main><RecoveryNoticeSurface notice={state.notice} /></>
+  return <><DesktopFrame />{state.terminalAvailable ? <RecoveryTerminalAction busy={state.busy} copy={copy} search={window.location.search} /> : null}<main className={cn('dshNativeContent h-screen overflow-hidden p-5 sm:p-6', state.busy && 'pointer-events-none opacity-70')}><div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4"><Reason copy={copy} state={state} /><Tabs defaultValue={state.activeTab}><TabsList className="w-full justify-start overflow-x-auto"><TabsTrigger value="quick"><LifeBuoy />{copy.tabs.quick}</TabsTrigger><TabsTrigger value="plugins"><Plug />{copy.tabs.plugins}</TabsTrigger><TabsTrigger value="rollback"><History />{copy.tabs.rollback}</TabsTrigger><TabsTrigger value="profiles"><Users />{copy.tabs.profiles}</TabsTrigger><TabsTrigger value="data"><HardDrive />{copy.tabs.data}</TabsTrigger><TabsTrigger value="diagnostics"><Stethoscope />{copy.tabs.diagnostics}</TabsTrigger></TabsList><TabsContent value="quick"><QuickRecoveryPanel copy={copy} state={state} /></TabsContent><TabsContent value="plugins"><PluginsPanel copy={copy} state={state} /></TabsContent><TabsContent value="rollback"><RollbackPanel copy={copy} state={state} /></TabsContent><TabsContent value="profiles"><ProfilesPanel copy={copy} state={state} /></TabsContent><TabsContent value="data"><DataManagementPanel copy={copy} state={state} /></TabsContent><TabsContent value="diagnostics"><DiagnosticsPanel copy={copy} state={state} /></TabsContent></Tabs><RecoveryActionFooter leading={state.busy ? <span className="inline-flex items-center gap-2 text-sm text-muted-foreground"><RefreshCw className="size-4 animate-spin" />{copy.working}</span> : undefined}><Action action="restart" icon={<RotateCcw />} variant={state.restartReady ? 'default' : 'outline'}>{copy.restart}</Action><Action action="quit" icon={<Power />}>{copy.quit}</Action></RecoveryActionFooter></div></main><RecoveryNoticeSurface notice={state.notice} /></>
 }

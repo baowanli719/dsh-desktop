@@ -21,6 +21,16 @@ const DIAGNOSTIC_DIALOG_INITIAL_HEIGHT = 460
 const DIALOG_PREFERRED_HEIGHT_OFFSET = 32
 const DIALOG_REVEAL_FALLBACK_MS = 250
 
+/** Windows and the content-sized compatibility notice already include the action row. */
+export function desktopDialogPreferredHeight(
+  preferredHeight: number,
+  platform: NodeJS.Platform = process.platform,
+  presentation: DesktopDialogOptions['presentation'] = 'default',
+): number {
+  return preferredHeight + (platform === 'win32' || presentation === 'profile-compatibility'
+    ? 0 : DIALOG_PREFERRED_HEIGHT_OFFSET)
+}
+
 export interface DesktopDialogOptions {
   readonly type?: 'none' | 'info' | 'error' | 'question' | 'warning'
   readonly title: string
@@ -169,7 +179,7 @@ export class DesktopDialogWindow {
       window.webContents.on('will-redirect', navigate)
       window.webContents.on('preferred-size-changed', (_event, size) => {
         if (!Number.isSafeInteger(size.height) || size.height <= 0) return
-        preferredHeight = size.height + DIALOG_PREFERRED_HEIGHT_OFFSET
+        preferredHeight = desktopDialogPreferredHeight(size.height, process.platform, this.options.presentation)
         applyPreferredSize()
       })
       window.webContents.on('did-finish-load', () => {

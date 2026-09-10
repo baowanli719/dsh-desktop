@@ -143,7 +143,6 @@ export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOption
       { status: response.status },
     )
   }
-  assertReleaseResponse(response, channel, options.version)
   if (response.body === null) {
     throw new UpdateDownloadError('empty-body', 'The update download service returned an empty body.')
   }
@@ -281,19 +280,6 @@ function validatedReleaseVersion(version: string): string {
     throw new UpdateDownloadError('invalid-options', 'The update version must belong to a supported release channel.')
   }
   return version
-}
-
-function assertReleaseResponse(
-  response: Response,
-  channel: DesktopReleaseChannel,
-  version: string,
-): void {
-  const responseChannel = response.headers.get(DESKTOP_RELEASE_CHANNEL_HEADER)
-  const responseVersion = response.headers.get(DESKTOP_TARGET_VERSION_HEADER)
-  if (channel === 'stable' && responseChannel === null && responseVersion === null) return
-  if (responseChannel !== channel || responseVersion !== version) {
-    throw new UpdateDownloadError('invalid-artifact', 'The update service returned a different release channel or version.')
-  }
 }
 
 function validatedUserDataPath(userDataPath: string): string {

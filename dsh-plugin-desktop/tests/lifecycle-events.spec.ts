@@ -355,18 +355,26 @@ describe('desktop lifecycle events', () => {
     const linkedFileTarget = join(linkedFileDir, 'target.jsonl')
     mkdirSync(join(linkedFileDir, 'lifecycle-events'))
     writeFileSync(linkedFileTarget, '')
-    symlinkSync(linkedFileTarget, desktopLifecycleEvidencePath(linkedFileDir), 'file')
-    const linkedFileLogger = createLogger()
-    const linkedFile = createDesktopLifecycleRecorder({
-      userDataDir: linkedFileDir,
-      appVersion: '2.0.1-test',
-      platform: 'win32',
-      arch: 'x64',
-      logger: linkedFileLogger,
-      now: () => FIXED_NOW,
-    })
-    expect(() => { linkedFile.startStartup('electron-ready') }).not.toThrow()
-    expect(linkedFileLogger.error).toHaveBeenCalledWith(expect.stringContaining('failed to persist lifecycle evidence'))
+    let linkedFileReady = true
+    try {
+      symlinkSync(linkedFileTarget, desktopLifecycleEvidencePath(linkedFileDir), 'file')
+    } catch {
+      // Windows without Developer Mode cannot create file symlinks.
+      linkedFileReady = false
+    }
+    if (linkedFileReady) {
+      const linkedFileLogger = createLogger()
+      const linkedFile = createDesktopLifecycleRecorder({
+        userDataDir: linkedFileDir,
+        appVersion: '2.0.1-test',
+        platform: 'win32',
+        arch: 'x64',
+        logger: linkedFileLogger,
+        now: () => FIXED_NOW,
+      })
+      expect(() => { linkedFile.startStartup('electron-ready') }).not.toThrow()
+      expect(linkedFileLogger.error).toHaveBeenCalledWith(expect.stringContaining('failed to persist lifecycle evidence'))
+    }
 
     const hardlinkDir = tempUserData('dsh-lifecycle-hardlink-')
     const hardlinkTarget = join(hardlinkDir, 'target.jsonl')

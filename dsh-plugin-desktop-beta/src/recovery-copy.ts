@@ -3,7 +3,7 @@
 import type { DesktopLocale } from './runtime.ts'
 import type { DesktopStartupRecoveryOperationStage } from './startup-recovery-controller.ts'
 
-export type DesktopRecoveryTab = 'quick' | 'plugins' | 'rollback' | 'profiles' | 'diagnostics'
+export type DesktopRecoveryTab = 'quick' | 'plugins' | 'rollback' | 'profiles' | 'data' | 'diagnostics'
 
 export type DesktopStartupFailureStage =
   | 'electron-ready'
@@ -22,13 +22,17 @@ export interface DesktopRecoveryCopy {
   readonly requestedMode: string
   readonly requestedBody: string
   readonly currentProfile: string
+  readonly currentProfileDirectory: string
   readonly failureStage: string
   readonly stageLabels: Readonly<Record<DesktopStartupFailureStage, string>>
   readonly tabs: Readonly<Record<DesktopRecoveryTab, string>>
   readonly quickRecovery: string
   readonly quickRecoveryBody: string
-  readonly profileGuide: string
-  readonly profileGuideBody: string
+  readonly pluginGuideBody: string
+  readonly rollbackGuideBody: string
+  readonly profileSwitchGuideBody: string
+  readonly dataGuideBody: string
+  readonly diagnosticsGuideBody: string
   readonly safeMode: string
   readonly safeModeBody: string
   readonly safeModeActiveBody: string
@@ -71,6 +75,40 @@ export interface DesktopRecoveryCopy {
   readonly profilesEmpty: string
   readonly switchProfile: string
   readonly addProfile: string
+  readonly resetAndDataManagement: string
+  readonly dataManagement: string
+  readonly dataManagementBody: string
+  readonly currentDataDirectory: string
+  readonly changeDataDirectory: string
+  readonly restoreDefaultDataDirectory: string
+  readonly dataDirectoryUnavailable: string
+  readonly dataDirectoryPath: string
+  readonly dataDirectoryPlaceholder: string
+  readonly selectDataDirectory: string
+  readonly browse: string
+  readonly applyDataDirectory: string
+  readonly cancelDataDirectoryChange: string
+  readonly factoryReset: string
+  readonly factoryResetBody: string
+  readonly factoryResetAction: string
+  readonly confirmDataDirectoryChange: string
+  readonly confirmDataDirectoryChangeMessage: string
+  readonly confirmDataDirectoryChangeBody: string
+  readonly continueDataDirectoryChange: string
+  readonly confirmRestoreDefaultDirectory: string
+  readonly confirmRestoreDefaultDirectoryMessage: string
+  readonly confirmRestoreDefaultDirectoryBody: string
+  readonly confirmRestoreDefaultDirectoryAction: string
+  readonly confirmCreateDefaultDirectory: string
+  readonly confirmCreateDefaultDirectoryMessage: string
+  readonly confirmCreateDefaultDirectoryBody: string
+  readonly confirmCreateDefaultDirectoryAction: string
+  readonly confirmFactoryReset: string
+  readonly confirmFactoryResetMessage: string
+  readonly confirmFactoryResetBody: (currentDirectory: string) => string
+  readonly confirmFactoryResetAction: string
+  readonly dataOperationFailedTitle: string
+  readonly dataOperationFailedMessage: string
   readonly openTerminal: string
   readonly emptySlot: string
   readonly availableSlot: string
@@ -115,6 +153,7 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     requestedMode: 'Opened from the restart menu',
     requestedBody: 'Normal startup is paused before the current Profile and plugin Host load.',
     currentProfile: 'Current Profile',
+    currentProfileDirectory: 'Profile folder',
     failureStage: 'Failure stage',
     stageLabels: {
       'electron-ready': 'Electron initialization',
@@ -126,22 +165,25 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
       'renderer-startup': 'Desktop interface startup',
       'health-commit': 'Startup health confirmation',
     },
-    tabs: { quick: 'Quick recovery', plugins: 'Plugin management', rollback: 'Rollback', profiles: 'Switch Profile', diagnostics: 'Diagnostics' },
+    tabs: { quick: 'Quick recovery', plugins: 'Plugin management', rollback: 'Rollback', profiles: 'Switch Profile', data: 'Reset & data', diagnostics: 'Diagnostics' },
     quickRecovery: 'Quick recovery',
-    quickRecoveryBody: 'You can enter Safe Mode first and use an isolated environment to diagnose the problem. You can also remove a problematic plugin, roll back directly to the configuration from before the last healthy startup, or switch to another Profile. Restart after making changes.',
-    profileGuide: 'What is a Profile?',
-    profileGuideBody: 'A Profile is a DSH runtime configuration that decides which plugins load. Plugin information is not shared between Profiles; Profiles under the same DSH Home still share session and workspace data.',
+    quickRecoveryBody: 'Start with Safe Mode, then use the recovery tabs from left to right. Each option below explains when to move to the next step. Restart after making a change.',
+    pluginGuideBody: 'If the problem disappears in Safe Mode, open Plugin management and try uninstalling the plugin most likely to be causing the problem from the current Profile.',
+    rollbackGuideBody: 'If removing one plugin is not enough, restore a healthy-start checkpoint from before the failure.',
+    profileSwitchGuideBody: 'Switch to another Profile or create a new one to restore normal Desktop use while keeping the current Profile for later investigation.',
+    dataGuideBody: 'Change the folder used to load data. Use factory reset only when all earlier recovery options have failed.',
+    diagnosticsGuideBody: 'Export a local diagnostic archive or open the current configuration files when you need to investigate or ask for help.',
     safeMode: 'Safe Mode',
-    safeModeBody: 'Safe Mode creates a disposable DSH home under Desktop private data. It does not read the normal ~/.dsh, so its plugins, settings, sessions, and workspaces start clean. The environment is deleted on the next normal launch after you quit or restart Safe Mode.',
+    safeModeBody: 'Safe Mode creates a disposable DSH home under Desktop private data. It does not read your normal DSH data directory, so its plugins, settings, sessions, and workspaces start clean. The environment is deleted on the next normal launch after you quit or restart Safe Mode.',
     safeModeActiveBody: 'This recovery session already belongs to Safe Mode. You can roll it back or switch its temporary Profile, then restart to leave Safe Mode.',
     safeModeUnavailable: 'Safe Mode cannot be prepared at this startup stage. Diagnostics remain available.',
     enterSafeMode: 'Enter Safe Mode',
     confirmSafeMode: 'Enter Safe Mode?',
     confirmSafeModeMessage: 'Restart with a clean, temporary DSH environment?',
-    confirmSafeModeBody: 'DSH Desktop will create an isolated DSH home without reading ~/.dsh. Your normal Profiles and data are not changed. The temporary environment is deleted on the next normal launch after you leave Safe Mode.',
+    confirmSafeModeBody: 'DSH Desktop will create an isolated DSH home without reading your normal DSH data directory. Your normal Profiles and data are not changed. The temporary environment is deleted on the next normal launch after you leave Safe Mode.',
     confirmSafeModeAction: 'Restart in Safe Mode',
     safeModeNotificationTitle: 'Safe Mode is active',
-    safeModeNotificationBody: 'This session uses a temporary DSH home instead of ~/.dsh. Restart or quit, then launch normally to delete it and return to your usual environment.',
+    safeModeNotificationBody: 'This session uses a temporary DSH home instead of your normal DSH data directory. Restart or quit, then launch normally to delete it and return to your usual environment.',
     checkpoints: 'Healthy-start checkpoints',
     checkpointsUnavailable: 'Checkpoint information is unavailable for this startup stage.',
     rollbackBody: 'Choose one of the three healthy-start slots to restore the current Profile together with shared settings.yaml and the Harness-home patch.',
@@ -173,6 +215,40 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     profilesEmpty: 'No other Desktop-compatible Profiles are available.',
     switchProfile: 'Switch',
     addProfile: 'New Profile',
+    resetAndDataManagement: 'Reset & data management',
+    dataManagement: 'Data management',
+    dataManagementBody: 'This shows the DSH data directory currently used by the Desktop app. Profiles, plugins, settings, sessions, and other data are loaded from and saved to this directory. Changing directories does not delete data in the original directory.',
+    currentDataDirectory: 'Current data directory',
+    changeDataDirectory: 'Change data directory',
+    restoreDefaultDataDirectory: 'Restore default',
+    dataDirectoryUnavailable: 'Data management is unavailable before the active DSH Home is resolved or while Safe Mode is active.',
+    dataDirectoryPath: 'New data directory',
+    dataDirectoryPlaceholder: 'Enter the full path',
+    selectDataDirectory: 'Select a DSH data directory',
+    browse: 'Browse…',
+    applyDataDirectory: 'Change directory and restart',
+    cancelDataDirectoryChange: 'Cancel change',
+    factoryReset: 'Factory reset',
+    factoryResetBody: 'Move the current DSH data directory to the operating-system Trash or Recycle Bin, then restart and rebuild a clean default Profile. Project files outside that directory are not deleted.',
+    factoryResetAction: 'Reset and reinstall',
+    confirmDataDirectoryChange: 'Change the data directory?',
+    confirmDataDirectoryChangeMessage: 'Continue to choose a new DSH data directory?',
+    confirmDataDirectoryChangeBody: 'We recommend using a path without Chinese characters.\n\nIf the target folder is empty, DSH Desktop will create a new environment. The old data directory will not be deleted.',
+    continueDataDirectoryChange: 'Continue',
+    confirmRestoreDefaultDirectory: 'Restore the default data directory?',
+    confirmRestoreDefaultDirectoryMessage: 'Switch to the default data directory and restart?',
+    confirmRestoreDefaultDirectoryBody: 'DSH Desktop will use the default data directory for this system after restart. The current data directory will not be deleted.',
+    confirmRestoreDefaultDirectoryAction: 'Restore and restart',
+    confirmCreateDefaultDirectory: 'Create the default data directory?',
+    confirmCreateDefaultDirectoryMessage: 'The default data directory does not exist. Create it?',
+    confirmCreateDefaultDirectoryBody: 'DSH Desktop will create a new environment at the default path and use it after restart. The current data directory will not be deleted.',
+    confirmCreateDefaultDirectoryAction: 'Create and restart',
+    confirmFactoryReset: 'Factory reset DSH Desktop?',
+    confirmFactoryResetMessage: 'Remove all data in the current DSH data directory and reinstall?',
+    confirmFactoryResetBody: currentDirectory => `The following directory will be moved to the operating-system Trash or Recycle Bin:\n\n${currentDirectory}\n\nProfiles, plugins, settings, credentials, sessions, attachments, and workspace records stored there will be removed from DSH Desktop. Project files outside this directory are not deleted. DSH Desktop will restart and create a clean default Profile.`,
+    confirmFactoryResetAction: 'Reset and reinstall',
+    dataOperationFailedTitle: 'Data operation failed',
+    dataOperationFailedMessage: 'The data directory was not changed. Choose an empty folder or an existing valid DSH data directory, then try again.',
     openTerminal: 'Open DSH Terminal',
     emptySlot: 'Empty',
     availableSlot: 'Available',
@@ -219,6 +295,7 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     requestedMode: '从重启菜单主动进入',
     requestedBody: '普通启动已暂停，当前 Profile 和插件 Host 尚未加载。',
     currentProfile: '当前 Profile',
+    currentProfileDirectory: 'Profile 目录',
     failureStage: '失败阶段',
     stageLabels: {
       'electron-ready': 'Electron 初始化',
@@ -230,22 +307,25 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
       'renderer-startup': '桌面界面启动',
       'health-commit': '启动健康状态确认',
     },
-    tabs: { quick: '快速恢复', plugins: '插件管理', rollback: '回滚', profiles: '切换 Profile', diagnostics: '诊断' },
+    tabs: { quick: '快速恢复', plugins: '插件管理', rollback: '回滚', profiles: '切换 Profile', data: '重置与数据管理', diagnostics: '诊断' },
     quickRecovery: '快速恢复',
-    quickRecoveryBody: '您可以先进入安全模式，使用独立环境排查问题；也可以考虑卸载异常插件，或者直接回滚至上一次正常启动前的配置，或切换到其他 Profile。修改后需要重启才能生效。',
-    profileGuide: 'Profile 是什么？',
-    profileGuideBody: 'Profile 是一套 DSH 运行配置，决定启动时加载哪些插件，不同Profile的插件信息不共享；同一个 DSH Home 下的多个 Profile 仍共享会话和工作区数据。',
+    quickRecoveryBody: '建议先进入安全模式，再按照上方导航从左到右逐步处理。下面会说明每一步适合解决的问题；完成修改后需要重启才能生效。',
+    pluginGuideBody: '如果问题在安全模式中消失，可以进入“插件管理”，从当前 Profile 尝试卸载最可能引发异常的插件。',
+    rollbackGuideBody: '如果仅卸载插件仍无法恢复，请选择故障发生前的健康启动 Checkpoint 进行回滚。',
+    profileSwitchGuideBody: '切换到其他或新建 Profile，可以先恢复桌面端的正常使用，同时保留当前 Profile 供后续排查。',
+    dataGuideBody: '可以更改用于加载数据的文件夹；只有前面的恢复方式都无效时，才建议执行恢复出厂设置。',
+    diagnosticsGuideBody: '需要进一步排查或寻求帮助时，可导出本地诊断包，并查看当前配置文件。',
     safeMode: '安全模式',
-    safeModeBody: '安全模式会在桌面版私有数据目录中创建一次性的 DSH Home，不读取默认的 ~/.dsh，因此插件、设置、会话和工作区记录都会从全新环境开始。退出或重启安全模式后，下一次普通启动会自动删除该环境。',
+    safeModeBody: '安全模式会在桌面版私有数据目录中创建一次性的 DSH Home，不读取当前正常使用的 DSH 数据目录，因此插件、设置、会话和工作区记录都会从全新环境开始。退出或重启安全模式后，下一次普通启动会自动删除该环境。',
     safeModeActiveBody: '当前恢复流程已处于安全模式。你可以回滚或切换临时 Profile；重启后将退出安全模式。',
     safeModeUnavailable: '当前启动阶段无法创建安全模式环境，但仍可查看诊断信息。',
     enterSafeMode: '进入安全模式',
     confirmSafeMode: '进入安全模式？',
     confirmSafeModeMessage: '使用全新的一次性 DSH 环境重启？',
-    confirmSafeModeBody: 'DSH Desktop 将创建一个不读取 ~/.dsh 的独立 DSH Home，不会修改原有 Profile 和数据。退出安全模式后，下一次普通启动会自动删除临时环境。',
+    confirmSafeModeBody: 'DSH Desktop 将创建一个不读取正常 DSH 数据目录的独立 DSH Home，不会修改原有 Profile 和数据。退出安全模式后，下一次普通启动会自动删除临时环境。',
     confirmSafeModeAction: '重启到安全模式',
     safeModeNotificationTitle: '安全模式已启用',
-    safeModeNotificationBody: '当前使用临时 DSH Home，不会读取 ~/.dsh。重启或退出后再普通启动，即会删除临时环境并返回原有环境。',
+    safeModeNotificationBody: '当前使用临时 DSH Home，不会读取正常 DSH 数据目录。重启或退出后再普通启动，即会删除临时环境并返回原有环境。',
     checkpoints: '健康启动 Checkpoint',
     checkpointsUnavailable: '当前启动阶段无法读取 Checkpoint 信息。',
     rollbackBody: '从三个健康启动槽位中选择一个，同时恢复当前 Profile、共享 settings.yaml 和 DSH home 补丁。',
@@ -277,6 +357,40 @@ const COPY: Record<DesktopLocale, DesktopRecoveryCopy> = {
     profilesEmpty: '没有其他支持桌面端的 Profile。',
     switchProfile: '切换',
     addProfile: '新建 Profile',
+    resetAndDataManagement: '重置与数据管理',
+    dataManagement: '数据管理',
+    dataManagementBody: '这里显示当前桌面端正在使用的 DSH 数据目录。Profile、插件、设置和会话等数据会从该目录加载和保存；更改目录不会删除原目录中的数据。',
+    currentDataDirectory: '当前数据目录',
+    changeDataDirectory: '更改数据目录',
+    restoreDefaultDataDirectory: '恢复默认',
+    dataDirectoryUnavailable: '尚未解析出当前 DSH Home，或正处于安全模式，因此暂时无法管理用户数据目录。',
+    dataDirectoryPath: '新的数据目录',
+    dataDirectoryPlaceholder: '输入完整路径',
+    selectDataDirectory: '选择 DSH 数据目录',
+    browse: '浏览…',
+    applyDataDirectory: '更改目录并重启',
+    cancelDataDirectoryChange: '取消更改',
+    factoryReset: '恢复出厂设置',
+    factoryResetBody: '将当前 DSH 数据目录移入系统废纸篓或回收站，然后重启并重新创建干净的默认 Profile。不会删除该目录以外的项目文件。',
+    factoryResetAction: '重置并重装',
+    confirmDataDirectoryChange: '更改数据目录？',
+    confirmDataDirectoryChangeMessage: '继续选择新的 DSH 数据目录？',
+    confirmDataDirectoryChangeBody: '建议不要使用中文路径。\n\n目标文件夹如果为空，则DSH Desktop 会创建一个全新的环境；旧数据目录不会被删除。',
+    continueDataDirectoryChange: '继续',
+    confirmRestoreDefaultDirectory: '恢复默认数据目录？',
+    confirmRestoreDefaultDirectoryMessage: '切换到系统默认数据目录并重启？',
+    confirmRestoreDefaultDirectoryBody: 'DSH Desktop 将改为使用当前系统的默认数据目录。当前数据目录不会被删除。',
+    confirmRestoreDefaultDirectoryAction: '恢复默认并重启',
+    confirmCreateDefaultDirectory: '新建默认数据目录？',
+    confirmCreateDefaultDirectoryMessage: '默认数据目录不存在，是否新建？',
+    confirmCreateDefaultDirectoryBody: 'DSH Desktop 将在默认路径创建一个全新的环境并重启。当前数据目录不会被删除。',
+    confirmCreateDefaultDirectoryAction: '新建并重启',
+    confirmFactoryReset: '恢复 DSH Desktop 出厂设置？',
+    confirmFactoryResetMessage: '删除当前 DSH 数据目录中的全部数据并重装？',
+    confirmFactoryResetBody: currentDirectory => `以下目录将被移入系统废纸篓或回收站：\n\n${currentDirectory}\n\n其中保存的 Profile、插件、设置、凭据、会话、附件和工作区记录都会从 DSH Desktop 中移除；不会删除此目录以外的项目文件。随后 DSH Desktop 会重启并创建干净的默认 Profile。`,
+    confirmFactoryResetAction: '重置并重装',
+    dataOperationFailedTitle: '数据操作失败',
+    dataOperationFailedMessage: '数据目录没有发生更改。请选择空文件夹或已有的合法 DSH 数据目录后重试。',
     openTerminal: '打开 DSH 终端',
     emptySlot: '空槽位',
     availableSlot: '可回滚',

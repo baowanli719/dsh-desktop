@@ -4,11 +4,32 @@ import { join, relative, resolve, sep } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const stableRoot = join(root, 'dsh-plugin-desktop', 'src')
 const betaRoot = join(root, 'dsh-plugin-desktop-beta', 'src')
+// PR #868's isolated compatibility chrome is beta-only. Stable retains the
+// single-document frame; both variants retain renderer crash recovery (#869).
+const betaOnlyPaths = new Set([
+  // Default Beta Host process experiment remains Beta-only until validated.
+  'host-bootstrap.ts',
+  'host-launch-environment.ts',
+  'host-process.ts',
+  'host-process-entry.ts',
+  'host-rpc.ts',
+  'host-runtime-bridge.ts',
+  'client/DesktopFrameTitlebarView.tsx',
+  'compatibility-chrome-contract.ts',
+  'compatibility-preload.ts',
+  'compatibility-shell.ts',
+  'native-ui/compatibility-chrome.html',
+  'native-ui/compatibility-chrome/main.tsx',
+  'native-ui/compatibility-chrome/overlay.ts',
+  'native-ui/compatibility-chrome/style.css',
+])
 const allowedDifferences = new Set([
   // The stable package is the gs-worker office Agent; Beta remains the stock
   // upstream DSH Desktop product. These files implement that product boundary.
   'app-icon.ts',
   'brand.ts',
+  'index.ts',
+  'notifications.ts',
   'client/DesktopAboutSection.tsx',
   'client/DesktopAccountMenu.tsx',
   'client/DesktopSkillsSection.tsx',
@@ -80,8 +101,12 @@ const allowedDifferences = new Set([
   'windows-volume-diagnostics.ts',
   'workspace-admission.ts',
   'agent-preset-compat.ts',
+  // Compatibility chrome integration differs intentionally between channels.
+  'client/window-service.ts',
   'bin.ts',
   'client/AdvancedFrame.tsx',
+  // Both channels use the v0.1.5 main/rightbar contract; remaining differences
+  // preserve channel identity and the beta-only compatibility frame.
   'client/desktop-settings.ts',
   'client/DesktopSettingsSection.tsx',
   'client/index.ts',
@@ -90,15 +115,15 @@ const allowedDifferences = new Set([
   'desktop-plugins.ts',
   'desktop-terminal.ts',
   'diagnostic-export-worker.ts',
-  'index.ts',
+  'launch-environment.ts',
   'main.ts',
   'native-ui/setup-wizard/App.tsx',
-  'notifications.ts',
   'product-identity.ts',
   'profile-manager.ts',
   'profile.ts',
   'safe-mode.ts',
   'setup-wizard-contract.ts',
+  'startup-recovery-window.ts',
   'updates.ts',
   'webserver.ts',
 ])
@@ -113,7 +138,7 @@ function files(directory, base = directory) {
   return result
 }
 
-const sharedPaths = new Set([...files(stableRoot), ...files(betaRoot)])
+const sharedPaths = new Set([...files(stableRoot), ...files(betaRoot), ...betaOnlyPaths])
 const differences = []
 for (const path of [...sharedPaths].sort()) {
   if (allowedDifferences.has(path)) continue
@@ -121,6 +146,10 @@ for (const path of [...sharedPaths].sort()) {
   let beta
   try { stable = readFileSync(join(stableRoot, path)) } catch { stable = undefined }
   try { beta = readFileSync(join(betaRoot, path)) } catch { beta = undefined }
+  if (betaOnlyPaths.has(path)) {
+    if (stable !== undefined || beta === undefined) differences.push(`${path} (must exist only in beta)`)
+    continue
+  }
   if (stable === undefined || beta === undefined || !stable.equals(beta)) differences.push(path)
 }
 
@@ -128,4 +157,4 @@ if (differences.length > 0) {
   throw new Error(`Desktop variant source drift is not declared:\n${differences.map(path => `- src/${path}`).join('\n')}`)
 }
 
-process.stdout.write(`verify-desktop-variants: ${String(sharedPaths.size - allowedDifferences.size)} shared source files are aligned\n`)
+process.stdout.write(`verify-desktop-variants: ${String(sharedPaths.size - allowedDifferences.size - betaOnlyPaths.size)} shared source files are aligned; beta-only compatibility chrome and Host experiment are isolated\n`)

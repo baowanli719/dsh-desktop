@@ -1,8 +1,10 @@
 /** DSH Desktop executable: minimal Electron bootstrap around the Host Cordis root. */
 
+import { startIsolatedDesktopHost } from './host-process.ts'
 import { app, crashReporter, safeStorage, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   boot,
@@ -13,11 +15,17 @@ import {
   type FailLoudProcess,
 } from '@deepseek-ai/dsh-app-boot'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
+import { defaultDshHome, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import {
+  DSH_LAUNCH_ENVIRONMENT_KEY,
+  type LaunchEnvironmentSnapshot,
+} from '@deepseek-ai/dsh-launch-environment'
 import type {} from '@deepseek-ai/dsh-web-app'
 import type {} from '@deepseek-ai/dsh-client-connection'
-import { isDesktopInstallerQuitRequest } from './desktop-installer-quit.ts'
+import {
+  isDesktopBackgroundNodeRequest,
+  isDesktopInstallerQuitRequest,
+} from './desktop-installer-quit.ts'
 import { createDesktopBrowserAccess } from './desktop-browser-access.ts'
 import {
   installDesktopDshRuntime,
@@ -50,11 +58,7 @@ import {
   desktopLoopbackBrowserUrl,
 } from './desktop-network.ts'
 import { desktopLanAddresses } from './lan-addresses.ts'
-import {
-  createLanHttpsCertificate,
-  DesktopLanHttpsCertificateError,
-  type DesktopLanHttpsPrivateKeyProtector,
-} from './lan-https-certificate.ts'
+import type { DesktopLanHttpsPrivateKeyProtector } from './lan-https-certificate.ts'
 import {
   DESKTOP_LAN_HTTPS_CA_PATH,
   DesktopLanHttpsRuntime,
@@ -86,7 +90,15 @@ import {
 } from './desktop-market.ts'
 import DesktopSettingsController from './desktop-settings-controller.ts'
 import {
+  resolveDesktopDataDirectory,
+  selectDesktopDataDirectory,
+  type DesktopDataDirectoryLocation,
+} from './desktop-data-directory.ts'
+import { acquireDesktopDataOperationLock } from './desktop-data-operation-lock.ts'
+import { resetDesktopDataDirectory } from './desktop-factory-reset.ts'
+import {
   clearDesktopProfilePreferences,
+  desktopProfilePreferencesFromSettings,
   readDesktopProfilePreferences,
   writeDesktopProfilePreferences,
   type DesktopProfilePreferences,
@@ -100,6 +112,7 @@ import {
   DesktopStartupRecoveryWindow,
   type RecoveryWindowResult,
   type DesktopStartupRecoveryConfigurationPaths,
+  type DesktopStartupRecoveryDataActions,
   type DesktopStartupRecoveryProfileActions,
   type DesktopStartupFailureStage,
 } from './startup-recovery-window.ts'
@@ -133,6 +146,7 @@ import { showDesktopDialog } from './desktop-dialog-window.ts'
 import {
   clearDesktopProfileUsageHistory,
   desktopReleaseUserDataLocations,
+  hasDesktopProfileUsageHistory,
   inspectDesktopProfileChannelAdmission,
 } from './profile-channel-admission.ts'
 import {
@@ -195,6 +209,21 @@ import { desktopRecoveryCopy } from './recovery-copy.ts'
 
 const BIN_NAME = DESKTOP_PACKAGE_NAME
 const PRODUCT_NAME = DESKTOP_PRODUCT_NAME
+
+function withDesktopDshHome(
+  environment: LaunchEnvironmentSnapshot,
+  homeDir: string,
+): LaunchEnvironmentSnapshot {
+  const entry = Object.freeze({ value: homeDir, source: 'process' as const })
+  return Object.freeze({
+    get: (name: string) => name.toUpperCase() === 'DSH_HOME' ? entry : environment.get(name),
+    getFrom: (name: string, sources: Parameters<LaunchEnvironmentSnapshot['getFrom']>[1]) => {
+      return name.toUpperCase() === 'DSH_HOME' && sources.includes('process')
+        ? entry
+        : environment.getFrom(name, sources)
+    },
+  })
+}
 
 /** Require OS-backed secret storage; Linux's plaintext fallback is not sufficient for a CA key. */
 function desktopLanHttpsPrivateKeyProtector(): DesktopLanHttpsPrivateKeyProtector {
@@ -325,21 +354,6 @@ function desktopProfileMarketSnapshot(market: DesktopMarketProvider): DesktopMar
   })
 }
 
-/** Project exactly the first-stage Profile fields from an effective settings view. */
-function desktopProfilePreferencesFromSettings(
-  desktop: Pick<DesktopSettings, 'mode' | 'openBrowser' | 'networkExposure'>,
-  notifications: Readonly<DesktopNotificationSettings>,
-  market: DesktopMarketProvider,
-): DesktopProfilePreferences {
-  return Object.freeze({
-    mode: desktop.mode,
-    openBrowser: desktop.openBrowser,
-    networkExposure: desktop.networkExposure,
-    notifications: Object.freeze({ ...notifications }),
-    market,
-  })
-}
-
 /** Preserve device-shared Wizard fields while mirroring one Profile's leaves. */
 function setupSettingsWithProfilePreferences(
   current: DesktopSetupWizardSettings,
@@ -392,6 +406,7 @@ async function start(): Promise<void> {
   let startupRecoveryConfigurationPaths: DesktopStartupRecoveryConfigurationPaths | undefined
   let profileCheckpoint: DesktopProfileCheckpoint | undefined
   let startupRecoveryProfileActions: DesktopStartupRecoveryProfileActions | undefined
+  let startupRecoveryDataActions: DesktopStartupRecoveryDataActions | undefined
   let safeModePaths: DesktopSafeModePaths | undefined
   let prepareSafeMode: (() => void) | undefined
   let sessionProjectionCacheRecovery:
@@ -510,11 +525,17 @@ async function start(): Promise<void> {
       throw new Error('dsh-plugin-desktop: shutdown coordinator is not ready')
     }
     if (restartRequested) return
+    if (target === 'safe-mode') {
+      if (prepareSafeMode === undefined) throw new Error(`${BIN_NAME}: Safe Mode is unavailable`)
+      prepareSafeMode()
+    }
     restartRequested = true
     nativeExit.requestRelaunch(
-      target === 'recovery'
-        ? desktopRecoveryRelaunchArguments()
-        : desktopDefaultRelaunchArguments(),
+      target === 'safe-mode'
+        ? desktopSafeModeRelaunchArguments()
+        : target === 'recovery'
+          ? desktopRecoveryRelaunchArguments()
+          : desktopDefaultRelaunchArguments(),
     )
     await shutdown.request(0)
   }, (report) => {
@@ -564,6 +585,7 @@ async function start(): Promise<void> {
         }),
         ...(recoveryTerminalAvailable ? { openTerminal: () => { runtime.openTerminal() } } : {}),
         ...(startupRecoveryProfileActions === undefined ? {} : { profileActions: startupRecoveryProfileActions }),
+        ...(startupRecoveryDataActions === undefined ? {} : { dataActions: startupRecoveryDataActions }),
         ...(prepareSafeMode === undefined ? {} : { enterSafeMode: prepareSafeMode }),
         ...(safeModePaths === undefined ? {} : { safeModeActive: true }),
       })
@@ -604,6 +626,9 @@ async function start(): Promise<void> {
       requestQuit(0)
       return
     }
+    if (isDesktopBackgroundNodeRequest(argv)) {
+      return
+    }
     if (!showPreHostSurface()) runtime.show()
   })
   try {
@@ -623,8 +648,6 @@ async function start(): Promise<void> {
     })
     for (const [name, value] of Object.entries(shellEnvironmentResolution.updates)) process.env[name] = value
     const profileUserDataDir = safeModePaths?.userDataDir ?? desktopUserDataDir
-    const homeDir = safeModePaths?.homeDir ?? resolveDshHome()
-    if (safeModePaths !== undefined) process.env.DSH_HOME = homeDir
     prepareSafeMode = safeModePaths === undefined
       ? () => {
           const paths = resetDesktopSafeModeEnvironment(desktopUserDataDir)
@@ -641,21 +664,6 @@ async function start(): Promise<void> {
           }
         }
       : undefined
-    const projectionCacheRecovery = recoverOversizedSessionProjectionCache(homeDir)
-    if (projectionCacheRecovery.status === 'quarantined') {
-      sessionProjectionCacheRecovery = projectionCacheRecovery
-      electronLogger.error(
-        `${BIN_NAME}: quarantined oversized session projection cache (${String(projectionCacheRecovery.sizeBytes)} bytes) at `
-          + `${projectionCacheRecovery.cachePath}; backup saved to ${projectionCacheRecovery.backupPath}`,
-      )
-    }
-    const windowsVolumeConcerns = diagnoseWindowsVolumes(process.platform, [
-      { label: 'application install', path: process.execPath },
-      { label: 'desktop user data', path: app.getPath('userData') },
-      { label: 'DSH home', path: homeDir },
-    ])
-    warnWindowsVolumeConcerns(electronLogger, windowsVolumeConcerns)
-
     const failLoudProcess: FailLoudProcess = {
       on: (event, handler) => process.on(event, handler),
       off: (event, handler) => process.off(event, handler),
@@ -682,6 +690,37 @@ async function start(): Promise<void> {
     })
     const dshBootstrapPath = fileURLToPath(new URL('./desktop-cli.js', import.meta.url))
     const releasePnpmRuntime = generation.own(() => { pnpmRuntime.dispose() })
+    const fallbackHome = resolveDshHome()
+    const defaultHome = resolve(defaultDshHome())
+    const fallbackSource = process.env.DSH_HOME === undefined ? 'default' : 'environment'
+    let dataDirectoryLocation: DesktopDataDirectoryLocation | undefined
+    let homeDir: string
+    if (safeModePaths !== undefined) {
+      homeDir = safeModePaths.homeDir
+    } else {
+      dataDirectoryLocation = resolveDesktopDataDirectory(
+        desktopUserDataDir,
+        fallbackHome,
+        fallbackSource,
+      )
+      homeDir = dataDirectoryLocation.homeDir
+    }
+    process.env.DSH_HOME = homeDir
+    const desktopLaunchEnvironment = withDesktopDshHome(environment, homeDir)
+    const projectionCacheRecovery = recoverOversizedSessionProjectionCache(homeDir)
+    if (projectionCacheRecovery.status === 'quarantined') {
+      sessionProjectionCacheRecovery = projectionCacheRecovery
+      electronLogger.error(
+        `${BIN_NAME}: quarantined oversized session projection cache (${String(projectionCacheRecovery.sizeBytes)} bytes) at `
+          + `${projectionCacheRecovery.cachePath}; backup saved to ${projectionCacheRecovery.backupPath}`,
+      )
+    }
+    const windowsVolumeConcerns = diagnoseWindowsVolumes(process.platform, [
+      { label: 'application install', path: process.execPath },
+      { label: 'desktop user data', path: desktopUserDataDir },
+      { label: 'DSH home', path: homeDir },
+    ])
+    warnWindowsVolumeConcerns(electronLogger, windowsVolumeConcerns)
     const selectionStatePath = join(profileUserDataDir, 'profile-selection', 'state.json')
     const pluginManagementStatePath = join(profileUserDataDir, 'plugin-management', 'state.json')
     const marketUserDataDir = profileUserDataDir
@@ -788,6 +827,14 @@ async function start(): Promise<void> {
         },
       })
       generation.own(() => { safeModeTray.dispose() })
+    } else {
+      const safeModeTray = runtime.registerTrayItem({
+        group: 'tools',
+        order: 100,
+        label: () => desktopTrayLabel(runtime.locale, 'enterSafeMode'),
+        invoke: () => runtime.requestSafeModeRestart(),
+      })
+      generation.own(() => { safeModeTray.dispose() })
     }
     const openCompatibilityProfileSelector = async (): Promise<'restart' | 'cancel' | 'unavailable'> => {
       const profileActions = startupRecoveryProfileActions
@@ -869,6 +916,101 @@ async function start(): Promise<void> {
       profilePatch: join(activeProfileDir, PROFILE_PATCH_FILENAME),
       profileManifest: join(activeProfileDir, 'package.json'),
       profileDirectory: activeProfileDir,
+    }
+    if (dataDirectoryLocation !== undefined) {
+      const recoveryDataLocation = dataDirectoryLocation
+      const selectRecoveryDataDirectory = async (
+        targetDirectory: string,
+        signal: AbortSignal,
+        operation: string,
+        createIfMissing = false,
+      ): Promise<void> => {
+        const lease = acquireDesktopDataOperationLock(desktopUserDataDir, operation)
+        try {
+          const current = resolveDesktopDataDirectory(
+            desktopUserDataDir,
+            fallbackHome,
+            fallbackSource,
+          )
+          if (current.homeDir !== recoveryDataLocation.homeDir
+            || current.generation !== recoveryDataLocation.generation) {
+            throw new Error(`${BIN_NAME}: active data directory changed while Recovery Assistant was open`)
+          }
+          const selection = await selectDesktopDataDirectory(
+            desktopUserDataDir,
+            current,
+            targetDirectory,
+            { signal, createIfMissing },
+          )
+          if (selection.target.kind === 'existing') {
+            const selectedName = readDesktopProfileState(selectionStatePath).active
+            const available = listDesktopProfiles(selection.location.homeDir)
+              .filter(profile => profile.webCapable && profile.problem === undefined)
+            const nextProfile = available.find(profile => profile.name === selectedName)
+              ?? available.find(profile => profile.name === 'desktop')
+              ?? available[0]
+            if (nextProfile !== undefined && nextProfile.name !== selectedName) {
+              try {
+                selectDesktopProfile(selectionStatePath, selection.location.homeDir, nextProfile.name)
+                expectedRecoveryProfileName = nextProfile.name
+              } catch (cause) {
+                electronLogger.error(
+                  `${BIN_NAME}: selected data directory requires Profile selection in Recovery Assistant: ${cause instanceof Error ? cause.message : String(cause)}`,
+                )
+              }
+            }
+          }
+        } finally {
+          lease.release()
+        }
+      }
+      const normalizedDefaultHome = process.platform === 'win32' ? defaultHome.toLowerCase() : defaultHome
+      const normalizedCurrentHome = process.platform === 'win32'
+        ? recoveryDataLocation.homeDir.toLowerCase()
+        : recoveryDataLocation.homeDir
+      startupRecoveryDataActions = {
+        currentDirectory: recoveryDataLocation.homeDir,
+        usingDefaultDirectory: normalizedCurrentHome === normalizedDefaultHome,
+        defaultDirectoryMissing: () => !existsSync(defaultHome),
+        changeDirectory: async (targetDirectory: string, signal: AbortSignal) => {
+          await selectRecoveryDataDirectory(
+            targetDirectory,
+            signal,
+            'change DSH data directory from Recovery Assistant',
+          )
+        },
+        restoreDefaultDirectory: async (signal: AbortSignal, createIfMissing: boolean) => {
+          await selectRecoveryDataDirectory(
+            defaultHome,
+            signal,
+            'restore default DSH data directory from Recovery Assistant',
+            createIfMissing,
+          )
+        },
+        resetDirectory: async () => {
+          const lease = acquireDesktopDataOperationLock(
+            desktopUserDataDir,
+            'factory reset DSH data directory from Recovery Assistant',
+          )
+          try {
+            await resetDesktopDataDirectory({
+              homeDir: recoveryDataLocation.homeDir,
+              userDataDir: marketUserDataDir,
+              protectedPaths: [
+                app.getPath('home'),
+                app.getPath('appData'),
+                desktopUserDataDir,
+                dirname(process.execPath),
+                process.cwd(),
+              ],
+              trashItem: async path => { await shell.trashItem(path) },
+              clearProfileUsageHistory: profileDir => { clearDesktopProfileUsageHistory(releaseUserDataLocations, profileDir) },
+            })
+          } finally {
+            lease.release()
+          }
+        },
+      }
     }
     if (profileCheckpoint !== undefined) {
       startupRecoveryController = new DesktopStartupRecoveryController({
@@ -963,6 +1105,7 @@ async function start(): Promise<void> {
       ? legacyMarketSelection
       : desktopProfileMarketSnapshot(profilePreferences.market)
     const preparationHooks = {
+      get aaEnabled() { return safeModePaths === undefined && profilePreferences?.aaEnabled === true },
       lanAddresses,
       onSettingsDocumentResolved: (settingsDocument: string) => {
         if (startupRecoveryConfigurationPaths === undefined) return
@@ -994,6 +1137,7 @@ async function start(): Promise<void> {
           safeModeDefaults.settings,
           safeModeDefaults.settings.notifications,
           safeModeDefaults.market,
+          safeModeDefaults.aaEnabled,
         ),
       )
       prepared = prepareDesktopProfile(
@@ -1074,6 +1218,7 @@ async function start(): Promise<void> {
       DESKTOP_SETUP_WIZARD_ENABLED
       && safeModePaths === undefined
       && desktopSetupWizardRequired(setupWizardState, setupWizardVersions)
+      && !hasDesktopProfileUsageHistory(releaseUserDataLocations, prepared.profile.dir, activeProfileName)
     ) {
       const setupSettings = readDesktopSetupWizardSettings(prepared.settingsDocument)
       setupWizardWindow = new DesktopSetupWizardWindow({
@@ -1085,6 +1230,7 @@ async function start(): Promise<void> {
           micaSupported: process.platform === 'win32' && windowsSupportsMica(runtime.windowsBuild),
           ...setupSettings,
           market: marketSelection.requested,
+          aaEnabled: profilePreferences?.aaEnabled === true,
         },
       })
       let setupResult: DesktopSetupWizardResult
@@ -1100,6 +1246,12 @@ async function start(): Promise<void> {
         return
       }
       if (setupResult.action === 'skip') {
+        profilePreferences = await writeDesktopProfilePreferences(marketUserDataDir, prepared.profile.dir, {
+          ...desktopProfilePreferencesFromSettings(setupSettings, setupSettings.notifications, marketSelection.requested),
+          aaEnabled: false,
+        })
+        prepared = prepareDesktopProfile(process.env.DSH_TELEMETRY_DISABLED, homeDir, process.platform,
+          activeProfileName, pluginManagementStatePath, marketSelection, preparationHooks)
         await completeOrSkipDesktopSetupWizard(
           marketUserDataDir,
           prepared.profile.dir,
@@ -1114,6 +1266,7 @@ async function start(): Promise<void> {
             setupResult.selection,
             setupResult.selection.notifications,
             setupResult.selection.market,
+            setupResult.selection.aaEnabled === true,
           ),
         )
         await updateDesktopSetupWizardSettings(prepared.settingsDocument, {
@@ -1209,36 +1362,34 @@ async function start(): Promise<void> {
         throw new Error(`${BIN_NAME}: Profile dependency migration failed: ${maskSecrets(detail)}`)
       }
     }
+    if (prepared.aaFailure !== undefined) {
+      electronLogger.error(`${BIN_NAME}: requested AA bundle was disabled for this generation: ${maskSecrets(prepared.aaFailure)}`)
+    }
     if (prepared.marketFailure !== undefined) {
       electronLogger.error(
         `${BIN_NAME}: requested Market provider ${prepared.market.requested} was disabled for this generation: ${prepared.marketFailure}`,
       )
     }
-    let lanHttpsCertificate: Awaited<ReturnType<typeof createLanHttpsCertificate>> | undefined
-    let lanHttpsFailureCode: string | undefined
-    if (prepared.lanAddresses.length === 0) {
-      lanHttpsFailureCode = 'no-address'
-    } else {
+    const prepareHostCertificate = async () => {
+      if (prepared.lanAddresses.length === 0) return { failureCode: 'no-address' }
+      const { createLanHttpsCertificate, DesktopLanHttpsCertificateError } = await import('./lan-https-certificate.ts')
       try {
-        lanHttpsCertificate = await createLanHttpsCertificate(
+        const certificate = await createLanHttpsCertificate(
           marketUserDataDir,
           prepared.lanAddresses,
           desktopLanHttpsPrivateKeyProtector(),
         )
+        return { certificate }
       } catch (cause) {
-        lanHttpsFailureCode = cause instanceof DesktopLanHttpsCertificateError
-          ? cause.code
-          : 'certificate-state'
+        const failureCode = cause instanceof DesktopLanHttpsCertificateError ? cause.code : 'certificate-state'
         electronLogger.error(
           `${BIN_NAME}: LAN HTTPS certificate setup is unavailable: ${cause instanceof Error ? cause.message : String(cause)}`,
         )
+        return { failureCode }
       }
     }
     const lanHttps = new DesktopLanHttpsRuntime({
-      addresses: prepared.lanAddresses,
-      ...(lanHttpsCertificate === undefined ? {} : { certificate: lanHttpsCertificate }),
-      ...(lanHttpsFailureCode === undefined ? {} : { failureCode: lanHttpsFailureCode }),
-      requestedPort: 0,
+      addresses: prepared.lanAddresses, prepareCertificate: prepareHostCertificate, requestedPort: 0,
     })
     const browserAccess = createDesktopBrowserAccess(
       prepared.mode === 'compatibility' && prepared.openBrowser,
@@ -1259,225 +1410,245 @@ async function start(): Promise<void> {
     if (profilePreferences === undefined) {
       throw new Error(`${BIN_NAME}: active Profile preferences were not initialized`)
     }
-    let currentProfilePreferences: DesktopProfilePreferences = profilePreferences
-    let profilePreferencesWriteTail: Promise<void> = Promise.resolve()
-    let profilePreferencesStopping = false
-    const enqueueProfilePreferencesWrite = (
-      update: (current: DesktopProfilePreferences) => DesktopProfilePreferences,
-    ): Promise<DesktopProfilePreferencesStateV1> => {
-      if (profilePreferencesStopping) {
-        return Promise.reject(new Error(`${BIN_NAME}: Profile preferences are stopping`))
-      }
-      const write = profilePreferencesWriteTail.then(async () => {
-        const next = update(currentProfilePreferences)
-        const stored = await writeDesktopProfilePreferences(
-          marketUserDataDir,
-          prepared.profile.dir,
-          next,
-        )
-        currentProfilePreferences = stored
-        return stored
+    if (process.env.DSH_DESKTOP_ISOLATED_HOST !== '0') {
+      startupStage = 'host-boot'
+      lifecycleRecorder.transitionStartupStage(startupStage)
+      await startIsolatedDesktopHost({
+        host: { prepared, profilePreferences, homeDir, activeProfileName, pluginManagementStatePath,
+          selectionStatePath, marketUserDataDir, releaseUserDataLocations, desktopLaunchEnvironment,
+          desktopPnpmBootstrap, logDirectory: join(desktopUserDataDir, 'logs', 'host') },
+        runtime, rendererToken: browserAccess.rendererHeader.value,
+        prepareCertificate: prepareHostCertificate,
+        bindHost: host => generation.bindHost(host), requestQuit,
+        onFailure: error => {
+          electronLogger.error(error.message)
+          runtime.notifyAttention({ title: PRODUCT_NAME, body: error.message })
+        },
       })
-      profilePreferencesWriteTail = write.then(() => undefined, () => undefined)
-      return write
-    }
-    const flushProfilePreferencesWrites = async (): Promise<void> => {
-      profilePreferencesStopping = true
-      await profilePreferencesWriteTail
-    }
-    startupStage = 'host-boot'
-    lifecycleRecorder.transitionStartupStage(startupStage)
-    const releasePackageResolver = installProfilePackageResolver(prepared.bareModuleBaseUrl)
-    const ctx = await boot(
-      BIN_NAME,
-      prepared.rootConfig,
-      prepared.patches,
-      async (hostCtx) => {
-        // Keep Host imports and browser bundle discovery on the same public
-        // profile-overlay resolver used by packaged Electron.
-        hostCtx.loader.internal = undefined
-        generation.bindHost(hostCtx)
-        hostCtx.effect(
-          () => async () => { await flushProfilePreferencesWrites() },
-          'dsh-plugin-desktop: flush Profile preference writes',
-        )
-        hostCtx.effect(
-          () => releasePnpmRuntime,
-          'dsh-plugin-desktop: packaged pnpm runtime PATH',
-        )
-        if (dshRuntime !== undefined) {
-          hostCtx.effect(
-            () => releaseDshRuntime,
-            'dsh-plugin-desktop: packaged dsh runtime PATH',
+    } else {
+      let currentProfilePreferences: DesktopProfilePreferences = profilePreferences
+      let profilePreferencesWriteTail: Promise<void> = Promise.resolve()
+      let profilePreferencesStopping = false
+      const enqueueProfilePreferencesWrite = (
+        update: (current: DesktopProfilePreferences) => DesktopProfilePreferences,
+      ): Promise<DesktopProfilePreferencesStateV1> => {
+        if (profilePreferencesStopping) {
+          return Promise.reject(new Error(`${BIN_NAME}: Profile preferences are stopping`))
+        }
+        const write = profilePreferencesWriteTail.then(async () => {
+          const next = update(currentProfilePreferences)
+          const stored = await writeDesktopProfilePreferences(
+            marketUserDataDir,
+            prepared.profile.dir,
+            next,
           )
-        }
-        hostCtx.effect(
-          () => releasePackageResolver,
-          'dsh-plugin-desktop: profile package resolution',
-        )
-        hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
-        hostCtx.provide('desktopBrowserAccess', browserAccess)
-        hostCtx.provide('desktopLanHttps', lanHttps)
-        hostCtx.provide('desktopRuntime', runtime)
-        hostCtx.provide('desktopPnpmBootstrap', desktopPnpmBootstrap)
-        await hostCtx.plugin(DesktopActionsService, {
-          openTerminal: () => { runtime.openTerminal() },
-          requestRestart: () => runtime.requestRestart(),
+          currentProfilePreferences = stored
+          return stored
         })
-        if (prepared.market.effective === 'community-market') {
-          await hostCtx.plugin(DesktopPluginsService, {
-            profileName: activeProfileName,
-            homeDir,
-            statePath: pluginManagementStatePath,
-            installAnchor: desktopInstallAnchor(),
+        profilePreferencesWriteTail = write.then(() => undefined, () => undefined)
+        return write
+      }
+      const flushProfilePreferencesWrites = async (): Promise<void> => {
+        profilePreferencesStopping = true
+        await profilePreferencesWriteTail
+      }
+      startupStage = 'host-boot'
+      lifecycleRecorder.transitionStartupStage(startupStage)
+      const releasePackageResolver = installProfilePackageResolver(prepared.bareModuleBaseUrl)
+      const ctx = await boot(
+        BIN_NAME,
+        prepared.rootConfig,
+        prepared.patches,
+        async (hostCtx) => {
+          // Keep Host imports and browser bundle discovery on the same public
+          // profile-overlay resolver used by packaged Electron.
+          hostCtx.loader.internal = undefined
+          generation.bindHost(hostCtx)
+          hostCtx.effect(
+            () => async () => { await flushProfilePreferencesWrites() },
+            'dsh-plugin-desktop: flush Profile preference writes',
+          )
+          hostCtx.effect(
+            () => releasePnpmRuntime,
+            'dsh-plugin-desktop: packaged pnpm runtime PATH',
+          )
+          if (dshRuntime !== undefined) {
+            hostCtx.effect(
+              () => releaseDshRuntime,
+              'dsh-plugin-desktop: packaged dsh runtime PATH',
+            )
+          }
+          hostCtx.effect(
+            () => releasePackageResolver,
+            'dsh-plugin-desktop: profile package resolution',
+          )
+          hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, desktopLaunchEnvironment)
+          hostCtx.provide('desktopBrowserAccess', browserAccess)
+          hostCtx.provide('desktopLanHttps', lanHttps)
+          hostCtx.provide('desktopRuntime', runtime)
+          hostCtx.provide('desktopPnpmBootstrap', desktopPnpmBootstrap)
+          await hostCtx.plugin(DesktopActionsService, {
+            openTerminal: () => { runtime.openTerminal() },
+            requestRestart: () => runtime.requestRestart(),
           })
-        }
-        if (logSink !== undefined) {
-          fileExporter = new FileExporter(logSink)
-          hostCtx.logger.exporter(fileExporter)
-        }
-        await hostCtx.plugin(DesktopProfileService, {
-          current: {
-            name: activeProfileName,
-            dir: prepared.profile.dir,
-          },
-          create: name => createFreshDesktopProfile(name),
-          list: () => listDesktopProfiles(homeDir),
-          canDelete: name => canDeleteDesktopProfile({
-            home: homeDir,
-            selectionStatePath,
-            currentProfileName: activeProfileName,
-          }, name),
-          delete: async name => {
-            const profileDir = resolveProfileDir(name, homeDir)
-            await deleteDesktopProfile({
+          if (prepared.market.effective === 'community-market') {
+            await hostCtx.plugin(DesktopPluginsService, {
+              profileName: activeProfileName,
+              homeDir,
+              statePath: pluginManagementStatePath,
+              installAnchor: desktopInstallAnchor(),
+            })
+          }
+          if (logSink !== undefined) {
+            fileExporter = new FileExporter(logSink)
+            hostCtx.logger.exporter(fileExporter)
+          }
+          await hostCtx.plugin(DesktopProfileService, {
+            current: {
+              name: activeProfileName,
+              dir: prepared.profile.dir,
+            },
+            create: name => createFreshDesktopProfile(name),
+            list: () => listDesktopProfiles(homeDir),
+            canDelete: name => canDeleteDesktopProfile({
               home: homeDir,
               selectionStatePath,
               currentProfileName: activeProfileName,
-              clearDisabledState: () => clearDesktopProfilePluginState(pluginManagementStatePath, name),
-              clearCheckpoint: async () => {
-                clearDesktopProfileUsageHistory(releaseUserDataLocations, profileDir)
-              },
-            }, name)
-            try {
-              await clearDesktopProfilePreferences(marketUserDataDir, profileDir)
-            } catch (cause) {
-              hostCtx.logger.error(
-                `${BIN_NAME}: deleted Profile left stale preference state: ${cause instanceof Error ? cause.message : String(cause)}`,
-              )
-            }
-          },
-          persistSelection: name => { selectDesktopProfile(selectionStatePath, homeDir, name) },
-          requestRestart: () => runtime.requestRestart(),
-        })
-        let pendingSettingsRestart: ReturnType<typeof setImmediate> | undefined
-        const scheduleSettingsRestart = (): void => {
-          pendingSettingsRestart ??= setImmediate(() => {
-            pendingSettingsRestart = undefined
-            void runtime.requestRestart().catch((cause: unknown) => {
-              hostCtx.logger.error(
-                `${BIN_NAME}: failed to restart after Desktop setting change: ${cause instanceof Error ? cause.message : String(cause)}`,
-              )
-            })
+            }, name),
+            delete: async name => {
+              const profileDir = resolveProfileDir(name, homeDir)
+              await deleteDesktopProfile({
+                home: homeDir,
+                selectionStatePath,
+                currentProfileName: activeProfileName,
+                clearDisabledState: () => clearDesktopProfilePluginState(pluginManagementStatePath, name),
+                clearCheckpoint: async () => {
+                  clearDesktopProfileUsageHistory(releaseUserDataLocations, profileDir)
+                },
+              }, name)
+              try {
+                await clearDesktopProfilePreferences(marketUserDataDir, profileDir)
+              } catch (cause) {
+                hostCtx.logger.error(
+                  `${BIN_NAME}: deleted Profile left stale preference state: ${cause instanceof Error ? cause.message : String(cause)}`,
+                )
+              }
+            },
+            persistSelection: name => { selectDesktopProfile(selectionStatePath, homeDir, name) },
+            requestRestart: () => runtime.requestRestart(),
           })
-        }
-        hostCtx.effect(() => () => {
-          if (pendingSettingsRestart !== undefined) clearImmediate(pendingSettingsRestart)
-          pendingSettingsRestart = undefined
-        }, 'dsh-plugin-desktop: pending Desktop settings restart')
-        const readMarket = () => desktopMarketSnapshotWithEffective(
-          desktopProfileMarketSnapshot(currentProfilePreferences.market),
-          prepared.market.effective,
-        )
-        hostCtx.provide('desktopSettingsController', new DesktopSettingsController({
-          profiles: hostCtx.desktopProfiles,
-          readMarket,
-          readWeb: () => {
-            const lan = lanHttps.snapshot()
-            const lanOrigins = lan.state === 'ready' && lan.actualPort !== null
-              ? desktopLanBrowserUrls(lan.actualPort, lan.addresses)
-              : []
-            return {
-              localUrl: hostCtx.connection.authenticatedUrl(
-                desktopLoopbackBrowserUrl(hostCtx.webServer.port),
-              ),
-              lanUrls: lanOrigins.map(url => hostCtx.connection.authenticatedUrl(url)),
-              lanState: lan.state,
-              lanError: lan.errorCode,
-              lanCaFingerprint: lan.caFingerprint,
-              lanCaUrls: lanOrigins.map((origin) => {
-                return new URL(DESKTOP_LAN_HTTPS_CA_PATH, origin).href
-              }),
-            }
-          },
-          selectMarket: async provider => {
-            await enqueueProfilePreferencesWrite(current => desktopProfilePreferencesFromSettings(
-              current,
-              current.notifications,
-              provider,
-            ))
-            return desktopMarketSnapshotWithEffective(
-              await selectDesktopMarketProvider(marketUserDataDir, provider),
-              prepared.market.effective,
-            )
-          },
-          scheduleRestart: scheduleSettingsRestart,
-          scheduleRecoveryRestart: () => {
-            void runtime.requestRecoveryRestart().catch((cause: unknown) => {
-              hostCtx.logger.error(
-                `${BIN_NAME}: failed to restart in recovery mode: ${cause instanceof Error ? cause.message : String(cause)}`,
+          let pendingSettingsRestart: ReturnType<typeof setImmediate> | undefined
+          const scheduleSettingsRestart = (): void => {
+            pendingSettingsRestart ??= setImmediate(() => {
+              pendingSettingsRestart = undefined
+              void runtime.requestRestart().catch((cause: unknown) => {
+                hostCtx.logger.error(
+                  `${BIN_NAME}: failed to restart after Desktop setting change: ${cause instanceof Error ? cause.message : String(cause)}`,
+                )
+              })
+            })
+          }
+          hostCtx.effect(() => () => {
+            if (pendingSettingsRestart !== undefined) clearImmediate(pendingSettingsRestart)
+            pendingSettingsRestart = undefined
+          }, 'dsh-plugin-desktop: pending Desktop settings restart')
+          const readMarket = () => desktopMarketSnapshotWithEffective(
+            desktopProfileMarketSnapshot(currentProfilePreferences.market),
+            prepared.market.effective,
+          )
+          hostCtx.provide('desktopSettingsController', new DesktopSettingsController({
+            profiles: hostCtx.desktopProfiles,
+            readMarket,
+            readAa: () => ({ requested: currentProfilePreferences.aaEnabled === true, effective: prepared.aaEnabled }),
+            selectAa: async enabled => {
+              await enqueueProfilePreferencesWrite(current => desktopProfilePreferencesFromSettings(
+                current,
+                current.notifications,
+                current.market,
+                enabled,
+              ))
+            },
+            readWeb: () => {
+              const lan = lanHttps.snapshot()
+              const lanOrigins = lan.state === 'ready' && lan.actualPort !== null
+                ? desktopLanBrowserUrls(lan.actualPort, lan.addresses)
+                : []
+              return {
+                localUrl: hostCtx.connection.authenticatedUrl(
+                  desktopLoopbackBrowserUrl(hostCtx.webServer.port),
+                ),
+                lanUrls: lanOrigins.map(url => hostCtx.connection.authenticatedUrl(url)),
+                lanState: lan.state,
+                lanError: lan.errorCode,
+                lanCaFingerprint: lan.caFingerprint,
+                lanCaUrls: lanOrigins.map((origin) => {
+                  return new URL(DESKTOP_LAN_HTTPS_CA_PATH, origin).href
+                }),
+              }
+            },
+            selectMarket: async provider => {
+              await enqueueProfilePreferencesWrite(current => desktopProfilePreferencesFromSettings(
+                current,
+                current.notifications,
+                provider,
+                current.aaEnabled === true,
+              ))
+              return desktopMarketSnapshotWithEffective(
+                await selectDesktopMarketProvider(marketUserDataDir, provider),
+                prepared.market.effective,
               )
-            })
-          },
-          openTerminal: () => { runtime.openTerminal() },
-          reloadRenderer: () => { runtime.reloadRenderer() },
-          toggleDeveloperTools: () => { runtime.toggleDeveloperTools() },
-          exportDiagnostics: () => runtime.exportDiagnostics(),
-          openProfileCreator: () => {
-            runtime.openProfileCreateWindow({
-              onSubmit: async name => {
-                hostCtx.desktopProfiles.create(name)
-                await hostCtx.desktopProfiles.select(name)
-              },
-            })
-          },
-        }))
-        provideCmdline(hostCtx, {
-          args: [
-            '--port',
-            String(prepared.port),
-          ],
-          exit: requestQuit,
-        })
-      },
-      prepared.bareModuleBaseUrl,
-    ).catch((cause: unknown) => {
-      releasePackageResolver()
-      throw cause
-    })
-    generation.bindHost(ctx)
-    fileExporter?.setThreshold((ctx.settings.get(DESKTOP_SETTINGS_NAMESPACE) as DesktopSettings | undefined)?.logLevel ?? 'info')
-    ctx.on('settings/updated', (namespace, next) => {
-      if (namespace === DESKTOP_SETTINGS_NAMESPACE) {
-        fileExporter?.setThreshold((next as DesktopSettings).logLevel)
-      }
-      if (namespace !== DESKTOP_SETTINGS_NAMESPACE
-        && namespace !== DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE) return
-      const write = enqueueProfilePreferencesWrite(current => desktopProfilePreferencesFromSettings(
-        namespace === DESKTOP_SETTINGS_NAMESPACE
-          ? next as DesktopSettings
-          : ctx.settings.get(DESKTOP_SETTINGS_NAMESPACE) as DesktopSettings,
-        namespace === DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE
-          ? next as DesktopNotificationSettings
-          : ctx.settings.get(DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE) as DesktopNotificationSettings,
-        current.market,
-      ))
-      void write.catch((cause: unknown) => {
-        ctx.logger.error(
-          `${BIN_NAME}: failed to capture active Profile settings: ${cause instanceof Error ? cause.message : String(cause)}`,
-        )
+            },
+            scheduleRestart: scheduleSettingsRestart,
+            scheduleRecoveryRestart: () => {
+              void runtime.requestRecoveryRestart().catch((cause: unknown) => {
+                hostCtx.logger.error(
+                  `${BIN_NAME}: failed to restart in recovery mode: ${cause instanceof Error ? cause.message : String(cause)}`,
+                )
+              })
+            },
+            openTerminal: () => { runtime.openTerminal() },
+            reloadRenderer: () => { runtime.reloadRenderer() },
+            toggleDeveloperTools: () => { runtime.toggleDeveloperTools() },
+            exportDiagnostics: () => runtime.exportDiagnostics(),
+          }))
+          provideCmdline(hostCtx, {
+            args: [
+              '--port',
+              String(prepared.port),
+            ],
+            exit: requestQuit,
+          })
+        },
+        prepared.bareModuleBaseUrl,
+      ).catch((cause: unknown) => {
+        releasePackageResolver()
+        throw cause
       })
-    })
+      generation.bindHost(ctx)
+      fileExporter?.setThreshold((ctx.settings.get(DESKTOP_SETTINGS_NAMESPACE) as DesktopSettings | undefined)?.logLevel ?? 'info')
+      ctx.on('settings/updated', (namespace, next) => {
+        if (namespace === DESKTOP_SETTINGS_NAMESPACE) {
+          fileExporter?.setThreshold((next as DesktopSettings).logLevel)
+        }
+        if (namespace !== DESKTOP_SETTINGS_NAMESPACE
+          && namespace !== DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE) return
+        const write = enqueueProfilePreferencesWrite(current => desktopProfilePreferencesFromSettings(
+          namespace === DESKTOP_SETTINGS_NAMESPACE
+            ? next as DesktopSettings
+            : ctx.settings.get(DESKTOP_SETTINGS_NAMESPACE) as DesktopSettings,
+          namespace === DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE
+            ? next as DesktopNotificationSettings
+            : ctx.settings.get(DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE) as DesktopNotificationSettings,
+          current.market,
+          current.aaEnabled === true,
+        ))
+        void write.catch((cause: unknown) => {
+          ctx.logger.error(
+            `${BIN_NAME}: failed to capture active Profile settings: ${cause instanceof Error ? cause.message : String(cause)}`,
+          )
+        })
+      })
+    }
     startupStage = 'renderer-startup'
     lifecycleRecorder.transitionStartupStage(startupStage)
     lifecycleRecorder.startRendererBoot()

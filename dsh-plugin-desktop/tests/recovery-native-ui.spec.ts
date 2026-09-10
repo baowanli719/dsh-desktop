@@ -7,20 +7,39 @@ import { RecoveryActionFooter, RecoveryActionLink } from '../src/native-ui/share
 import { desktopRecoveryCopy } from '../src/recovery-copy.ts'
 
 describe('Recovery native terminal action', () => {
-  it('adds Quick recovery before the original Recovery Assistant pages', () => {
+  it('orders Quick recovery guidance and adds data management before diagnostics', () => {
     const source = readFileSync(new URL('../src/native-ui/recovery/App.tsx', import.meta.url), 'utf8')
-    expect(source.match(/<TabsTrigger value=/gu)).toHaveLength(5)
+    expect(source.match(/<TabsTrigger value=/gu)).toHaveLength(6)
     expect(source).toContain('<TabsTrigger value="quick">')
     expect(source).toContain('<TabsTrigger value="plugins">')
     expect(source).toContain('<TabsTrigger value="rollback">')
     expect(source).toContain('<TabsTrigger value="profiles">')
+    expect(source).toContain('<TabsTrigger value="data">')
     expect(source).toContain('<TabsTrigger value="diagnostics">')
+    expect(source.indexOf('<TabsTrigger value="data">')).toBeLessThan(source.indexOf('<TabsTrigger value="diagnostics">'))
     expect(source).toContain('<SafeModePanel copy={copy} state={state} />')
     expect(source).toContain('<CardTitle className="flex items-center gap-2"><CircleHelp className="size-5" />{copy.quickRecovery}</CardTitle>')
-    expect(source).toContain('<CardTitle className="flex items-center gap-2"><Users className="size-5" />{copy.profileGuide}</CardTitle>')
+    expect(source).not.toContain('copy.profileGuide')
+    const safeMode = source.indexOf('<SafeModePanel copy={copy} state={state} />')
+    const plugins = source.indexOf('body={copy.pluginGuideBody}')
+    const rollback = source.indexOf('body={copy.rollbackGuideBody}')
+    const profiles = source.indexOf('body={copy.profileSwitchGuideBody}')
+    const data = source.indexOf('body={copy.dataGuideBody}')
+    const diagnostics = source.indexOf('body={copy.diagnosticsGuideBody}')
+    expect([safeMode, plugins, rollback, profiles, data, diagnostics]).toEqual(
+      [...[safeMode, plugins, rollback, profiles, data, diagnostics]].sort((left, right) => left - right),
+    )
     expect(source).toContain('<TabsContent value="plugins"><PluginsPanel copy={copy} state={state} /></TabsContent>')
     expect(source).toContain('<TabsContent value="rollback"><RollbackPanel copy={copy} state={state} /></TabsContent>')
     expect(source).toContain('<TabsContent value="profiles"><ProfilesPanel copy={copy} state={state} /></TabsContent>')
+    expect(source).toContain('<TabsContent value="data"><DataManagementPanel copy={copy} state={state} /></TabsContent>')
+    expect(source).toContain('action="restore-default-data-directory"')
+    expect(source).toContain('data.usingDefaultDirectory ? null')
+    expect(source.indexOf('action="restore-default-data-directory"')).toBeLessThan(
+      source.indexOf('action="begin-change-data-directory"'),
+    )
+    expect(source).toContain('{copy.currentProfileDirectory}:&nbsp;')
+    expect(source).toContain('title={state.profileDirectory}')
   })
 
   it('uses the shared ScrollArea for the standalone Profile selector', () => {

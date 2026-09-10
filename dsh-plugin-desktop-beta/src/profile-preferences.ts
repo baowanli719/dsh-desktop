@@ -31,6 +31,7 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/u
 const CHECK_POSIX_MODE = process.platform !== 'win32'
 
 const SELECTION_KEYS = Object.freeze([
+  'aaEnabled',
   'market',
   'mode',
   'networkExposure',
@@ -47,6 +48,7 @@ const NOTIFICATION_KEYS = Object.freeze([
 ] as const)
 
 const STATE_KEYS = Object.freeze([
+  'aaEnabled',
   'market',
   'mode',
   'networkExposure',
@@ -63,6 +65,7 @@ export interface DesktopProfilePreferences {
   readonly openBrowser: boolean
   readonly networkExposure: DesktopNetworkExposure
   readonly notifications: Readonly<DesktopNotificationSettings>
+  readonly aaEnabled?: boolean
   readonly market: DesktopMarketProvider
 }
 
@@ -71,6 +74,23 @@ export interface DesktopProfilePreferencesStateV1 extends DesktopProfilePreferen
   readonly version: 1
   readonly profileHash: string
   readonly recordedAt: string
+}
+
+/** Project exactly the first-stage Profile fields from an effective settings view. */
+export function desktopProfilePreferencesFromSettings(
+  desktop: Pick<DesktopProfilePreferences, 'mode' | 'openBrowser' | 'networkExposure'>,
+  notifications: Readonly<DesktopNotificationSettings>,
+  market: DesktopMarketProvider,
+  aaEnabled = false,
+): DesktopProfilePreferences {
+  return Object.freeze({
+    mode: desktop.mode,
+    openBrowser: desktop.openBrowser,
+    networkExposure: desktop.networkExposure,
+    notifications: Object.freeze({ ...notifications }),
+    market,
+    aaEnabled,
+  })
 }
 
 type ErrorFactory = (message: string) => Error
@@ -88,7 +108,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort()
+  const actual = Object.keys(expected.includes('aaEnabled') ? { aaEnabled: false, ...value } : value).sort()
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
@@ -149,6 +169,7 @@ function normalizedPreferences(
   if (!isRecord(value) || !hasExactKeys(value, SELECTION_KEYS)) {
     throw error('preferences must contain exactly the supported fields')
   }
+  if (value.aaEnabled !== undefined && typeof value.aaEnabled !== 'boolean') throw error('aaEnabled must be a boolean')
   const mode = assertMode(value.mode, error)
   if (typeof value.openBrowser !== 'boolean') throw error('openBrowser must be a boolean')
   const networkExposure = assertExposure(value.networkExposure, error)
@@ -163,6 +184,7 @@ function normalizedPreferences(
     openBrowser: value.openBrowser,
     networkExposure,
     notifications: normalizedNotifications(value.notifications, error),
+    aaEnabled: value.aaEnabled === true,
     market: assertMarket(value.market, error),
   })
 }
@@ -279,6 +301,7 @@ function parseState(text: string, expectedProfileHash: string): DesktopProfilePr
     openBrowser: value.openBrowser,
     networkExposure: value.networkExposure,
     notifications: value.notifications,
+    aaEnabled: value.aaEnabled,
     market: value.market,
   }, invalid)
   return Object.freeze({

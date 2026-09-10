@@ -26,7 +26,7 @@ import { DialogClose } from '../src/native-ui/components/ui/dialog.tsx'
 import { desktopSetupWizardCopy } from '../src/setup-wizard-copy.ts'
 
 const input: DesktopSetupWizardInput = {
-  appVersion: '2.0.5-beta.2',
+  appVersion: '2.0.6-beta.1',
   profileName: 'work',
   platform: 'darwin',
   micaSupported: false,
@@ -35,6 +35,7 @@ const input: DesktopSetupWizardInput = {
   windowsMaterial: 'off',
   openBrowser: false,
   networkExposure: 'loopback',
+  aaEnabled: false,
   market: 'community-market',
   notifications: {
     enabled: true,
@@ -51,6 +52,7 @@ const selection: DesktopSetupWizardSelection = {
   windowsMaterial: input.windowsMaterial,
   openBrowser: input.openBrowser,
   networkExposure: input.networkExposure,
+  aaEnabled: false,
   market: input.market,
   notifications: input.notifications,
 }
@@ -101,6 +103,7 @@ describe('Setup Wizard step flow', () => {
       'mode',
       'material',
       'market',
+      'aa',
       'notifications',
       'browser',
       'success',
@@ -114,6 +117,7 @@ describe('Setup Wizard step flow', () => {
       'mode',
       'material',
       'market',
+      'aa',
       'notifications',
       'browser',
     ])
@@ -121,6 +125,7 @@ describe('Setup Wizard step flow', () => {
       'mode',
       'material',
       'market',
+      'aa',
       'notifications',
       'browser',
       'success',
@@ -453,4 +458,12 @@ describe('Setup Wizard native UI boundaries', () => {
     expect(decodeDesktopSetupWizardInput(valid.replace('locale=zh', 'locale=fr'))).toBeUndefined()
     expect(decodeDesktopSetupWizardInput(valid.replace('frame=true', 'frame=yes'))).toBeUndefined()
   })
+})
+
+it('offers AA opt-in with a Beta badge after the market page', () => {
+  const html = renderStep('aa')
+  expect(html).toContain('Agents-Anywhere')
+  expect(html).toContain('Beta')
+  expect(html).toContain('setup-aa-false')
+  expect(html).toContain('setup-aa-true')
 })

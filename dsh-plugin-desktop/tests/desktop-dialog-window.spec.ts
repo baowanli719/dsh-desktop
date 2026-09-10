@@ -51,6 +51,7 @@ vi.mock('electron', () => ({ app: electron.app, BrowserWindow: electron.BrowserW
 
 import {
   DesktopDialogWindow,
+  desktopDialogPreferredHeight,
   parseDesktopDialogResponse,
 } from '../src/desktop-dialog-window.ts'
 
@@ -68,7 +69,13 @@ describe('DesktopDialogWindow', () => {
     expect(parseDesktopDialogResponse('https://response/?id=1', 2)).toBeUndefined()
   })
 
+  it('does not add the legacy action-row offset on Windows', () => {
+    expect(desktopDialogPreferredHeight(134, 'win32')).toBe(134)
+    expect(desktopDialogPreferredHeight(134, 'darwin')).toBe(166)
+  })
+
   it('creates a frameless parented modal shadcn window and returns its explicit response', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const parent = new electron.BrowserWindow({})
     const dialog = new DesktopDialogWindow({
       type: 'question',
@@ -112,7 +119,7 @@ describe('DesktopDialogWindow', () => {
     preferredSize?.({}, { width: 492, height: 134 })
     expect(window?.setContentSize).not.toHaveBeenCalled()
     window?.webListeners.get('did-finish-load')?.()
-    expect(window?.setContentSize).toHaveBeenCalledWith(480, 166, false)
+    expect(window?.setContentSize).toHaveBeenCalledWith(480, 134, false)
     expect(window?.setBounds).not.toHaveBeenCalled()
     expect(window?.show).toHaveBeenCalledOnce()
     const event = { preventDefault: vi.fn() }
@@ -124,6 +131,7 @@ describe('DesktopDialogWindow', () => {
   })
 
   it('uses a larger scrollable presentation for detailed recovery failures', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const parent = new electron.BrowserWindow({})
     const result = new DesktopDialogWindow({
       type: 'error',
@@ -158,7 +166,7 @@ describe('DesktopDialogWindow', () => {
     window?.onceListeners.get('ready-to-show')?.()
     window?.webListeners.get('preferred-size-changed')?.({}, { width: 680, height: 390 })
     window?.webListeners.get('did-finish-load')?.()
-    expect(window?.setContentSize).toHaveBeenCalledWith(680, 422, false)
+    expect(window?.setContentSize).toHaveBeenCalledWith(680, 390, false)
     window?.webListeners.get('will-navigate')?.(
       { preventDefault: vi.fn() },
       'dsh-desktop-dialog://response?id=0',
@@ -166,7 +174,8 @@ describe('DesktopDialogWindow', () => {
     await expect(result).resolves.toEqual({ response: 0 })
   })
 
-  it('keeps Profile compatibility guidance outside the version detail', async () => {
+  it('sizes the macOS Profile compatibility notice to its content without extra height', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const result = new DesktopDialogWindow({
       type: 'warning',
       title: 'Profile compatibility warning',
@@ -189,6 +198,9 @@ describe('DesktopDialogWindow', () => {
       presentation: 'profile-compatibility',
       advisory: 'Warning: DSH version differences may make plugins unavailable.',
     })
+    window?.webListeners.get('preferred-size-changed')?.({}, { width: 480, height: 320 })
+    window?.webListeners.get('did-finish-load')?.()
+    expect(window?.setContentSize).toHaveBeenCalledWith(480, 320, false)
     window?.webListeners.get('will-navigate')?.(
       { preventDefault: vi.fn() },
       'dsh-desktop-dialog://response?id=2',

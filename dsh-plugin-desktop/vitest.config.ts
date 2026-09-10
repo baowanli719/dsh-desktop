@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.spec.ts'],
+    globalSetup: process.platform === 'win32' ? ['../scripts/prepare-test-electron.mjs'] : [],
     // This patched host package is exercised with a mocked node:fs/promises.
     // Keep it in Vitest's module graph so the builtin mock reaches its imports.
     server: {

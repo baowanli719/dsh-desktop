@@ -44,6 +44,7 @@ const BROWSER_AUTH_TOKEN = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 const CA_FINGERPRINT = 'a'.repeat(64)
 
 const VIEW: DesktopSettingsView = {
+  aa: { requested: false, effective: false },
   current: 'desktop',
   profiles: [
     { name: 'desktop', exists: true, webCapable: true, selectable: true, deletable: false },

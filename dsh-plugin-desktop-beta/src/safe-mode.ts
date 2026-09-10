@@ -1,13 +1,13 @@
 /** Disposable, launcher-owned DSH environment used by Desktop Safe Mode. */
 
-import { randomUUID } from 'node:crypto'
 import {
   chmodSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
-  renameSync,
-  rmSync,
+  rmdirSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
@@ -21,15 +21,18 @@ const SAFE_MODE_VERSION = 1
 const DIRECTORY_MODE = 0o700
 const FILE_MODE = 0o600
 const MAX_MARKER_BYTES = 4 * 1024
+const CLEANUP_RETRY_CODES = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM'])
 
 /** Visible Profile identity used throughout the temporary DSH environment. */
 export const DESKTOP_SAFE_MODE_PROFILE_NAME = 'desktop-safe-mode'
 
 /** Fixed, disposable preferences used without showing first-run Setup. */
 export const DESKTOP_SAFE_MODE_DEFAULTS: Readonly<{
+  aaEnabled: false
   market: DesktopMarketProvider
   settings: DesktopSetupWizardSettings
 }> = Object.freeze({
+  aaEnabled: false,
   market: 'disabled',
   settings: Object.freeze({
     mode: 'compatibility',
@@ -50,7 +53,7 @@ export const DESKTOP_SAFE_MODE_DEFAULTS: Readonly<{
 export interface DesktopSafeModePaths {
   /** Root removed during Safe Mode shutdown and retried on the next normal launch. */
   readonly rootDir: string
-  /** Isolated Harness home; Safe Mode never reads the normal `~/.dsh`. */
+  /** Isolated Harness home; Safe Mode never reads the normal DSH data directory. */
   readonly homeDir: string
   /** Isolated Desktop state for selection, setup, checkpoints, and preferences. */
   readonly userDataDir: string
@@ -108,7 +111,21 @@ function validMarker(paths: DesktopSafeModePaths): boolean {
   }
 }
 
-/** Remove only the fixed disposable Safe Mode tree. */
+function removeSafeModeEntry(path: string): void {
+  try {
+    const stat = lstatSync(path)
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      unlinkSync(path)
+      return
+    }
+    for (const name of readdirSync(path)) removeSafeModeEntry(join(path, name))
+    rmdirSync(path)
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause
+  }
+}
+
+/** Remove only the disposable tree, unlinking junctions without visiting their targets. */
 export function cleanupDesktopSafeModeEnvironment(userDataDir: string): boolean {
   const paths = desktopSafeModePaths(userDataDir)
   try {
@@ -117,38 +134,39 @@ export function cleanupDesktopSafeModeEnvironment(userDataDir: string): boolean 
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return false
     throw cause
   }
-  rmSync(paths.rootDir, { recursive: true, force: true, maxRetries: 3 })
-  return true
+  for (let attempt = 0; ; attempt++) {
+    try {
+      removeSafeModeEntry(paths.rootDir)
+      return true
+    } catch (cause) {
+      if (attempt >= 3 || !CLEANUP_RETRY_CODES.has((cause as NodeJS.ErrnoException).code ?? '')) throw cause
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100 * (attempt + 1))
+    }
+  }
 }
 
-/** Create a fresh environment through a sibling staging directory. */
+/** Create a fresh environment and mark it ready only after directory preparation succeeds. */
 export function resetDesktopSafeModeEnvironment(
   userDataDir: string,
   now: () => Date = () => new Date(),
 ): DesktopSafeModePaths {
   const paths = desktopSafeModePaths(userDataDir)
-  const staging = `${paths.rootDir}.creating-${process.pid}-${randomUUID()}`
   cleanupDesktopSafeModeEnvironment(userDataDir)
-  rmSync(staging, { recursive: true, force: true })
   try {
-    const stagingHome = join(staging, 'dsh-home')
-    const stagingUserData = join(staging, 'desktop-state')
-    mkdirSync(stagingHome, { recursive: true, mode: DIRECTORY_MODE })
-    mkdirSync(stagingUserData, { recursive: true, mode: DIRECTORY_MODE })
-    writeFileSync(join(staging, SAFE_MODE_MARKER), `${JSON.stringify({
+    mkdirSync(paths.homeDir, { recursive: true, mode: DIRECTORY_MODE })
+    mkdirSync(paths.userDataDir, { recursive: true, mode: DIRECTORY_MODE })
+    chmodSync(paths.rootDir, DIRECTORY_MODE)
+    chmodSync(paths.homeDir, DIRECTORY_MODE)
+    chmodSync(paths.userDataDir, DIRECTORY_MODE)
+    writeFileSync(markerPath(paths), `${JSON.stringify({
       version: SAFE_MODE_VERSION,
       createdAt: now().toISOString(),
     } satisfies DesktopSafeModeMarkerV1, null, 2)}\n`, {
       flag: 'wx',
       mode: FILE_MODE,
     })
-    renameSync(staging, paths.rootDir)
-    chmodSync(paths.rootDir, DIRECTORY_MODE)
-    chmodSync(paths.homeDir, DIRECTORY_MODE)
-    chmodSync(paths.userDataDir, DIRECTORY_MODE)
     return paths
   } catch (cause) {
-    rmSync(staging, { recursive: true, force: true })
     cleanupDesktopSafeModeEnvironment(userDataDir)
     throw cause
   }

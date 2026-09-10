@@ -260,7 +260,8 @@ function normalizedUpdate(
   })
 }
 
-function sameSettings(
+/** Return whether two normalized Setup views have identical persisted leaves. */
+export function sameDesktopSetupWizardSettings(
   current: DesktopSetupWizardSettings,
   next: DesktopSetupWizardSettings,
 ): boolean {
@@ -341,7 +342,7 @@ export async function updateDesktopSetupWizardSettings(
   // Explicit default leaves do not need to be materialized. Apart from making
   // Setup idempotent, this lets an unchanged first-run choice proceed while an
   // unrelated or orphaned settings writer lock exists.
-  if (sameSettings(projectSettings(loadSettingsDocument(path).root), next)) return next
+  if (sameDesktopSetupWizardSettings(projectSettings(loadSettingsDocument(path).root), next)) return next
   ensureDocumentDirectory(path)
   const loaded = loadSettingsDocument(path)
   // Refuse to cover an invalid known value, including the inactive platform's

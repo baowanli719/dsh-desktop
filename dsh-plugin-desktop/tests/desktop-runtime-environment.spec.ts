@@ -1,16 +1,20 @@
 import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
-import { delimiter as pathDelimiter, join } from 'node:path'
+import { basename, delimiter as pathDelimiter, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -68,6 +72,12 @@ describe('desktop Host pnpm runtime', () => {
 
     expect(readdirSync(installation.pathDir)).toEqual(['pnpm'])
     expect(readdirSync(installation.nodeBinDir)).toEqual(['node'])
+    const generationRoot = dirname(installation.pathDir)
+    const manifest = JSON.parse(readFileSync(join(generationRoot, '.generation.json'), 'utf8')) as {
+      contentHash: string
+    }
+    expect(readdirSync(generationRoot).sort()).toEqual(['.generation.json', 'bin', 'private'])
+    expect(basename(generationRoot)).toMatch(new RegExp(`^${manifest.contentHash}-`))
     if (process.platform !== 'win32') {
       expect(lstatSync(stateDir).mode & 0o777).toBe(0o700)
       expect(lstatSync(installation.pathDir).mode & 0o777).toBe(0o700)
@@ -77,24 +87,24 @@ describe('desktop Host pnpm runtime', () => {
       expect(lstatSync(installation.clearEnvironmentPath).mode & 0o777).toBe(0o600)
     }
 
-    const clearEnvironmentUrl = pathToFileURL(installation.clearEnvironmentPath).href
     const pnpm = readFileSync(installation.pnpmShimPath, 'utf8')
-    expect(pnpm).toContain(`PATH='${installation.nodeBinDir}':"\${PATH:-}"`)
-    expect(pnpm).toContain(`NODE='${installation.nodeShimPath}'`)
+    expect(pnpm).toContain('runtime_root_dir=${runtime_public_dir%/*}')
+    expect(pnpm).toContain('PATH="$runtime_node_bin_dir:${PATH:-}"')
+    expect(pnpm).toContain('NODE="$runtime_node_shim"')
     expect(pnpm).toContain('ELECTRON_RUN_AS_NODE=1 npm_config_runtime=electron')
     expect(pnpm).toContain("npm_config_target='43.4.0'")
     expect(pnpm).toContain("npm_config_disturl='https://electronjs.org/headers'")
     expect(pnpm.match(/--config\.minimumReleaseAge=0/gu)).toHaveLength(1)
     expect(pnpm).toContain('--config.minimumReleaseAge=0 "$@"')
-    expect(pnpm).toContain(`--import '${clearEnvironmentUrl}'`)
-    expect(pnpm.indexOf(`--import '${clearEnvironmentUrl}'`)).toBeLessThan(pnpm.indexOf('pnpm/bin/pnpm.mjs'))
+    expect(pnpm).toContain('--require "$runtime_clear_environment"')
+    expect(pnpm.indexOf('--require "$runtime_clear_environment"')).toBeLessThan(pnpm.indexOf('pnpm/bin/pnpm.mjs'))
     const node = readFileSync(installation.nodeShimPath, 'utf8')
     expect(node).toContain(`ELECTRON_RUN_AS_NODE=1 exec`)
-    expect(node).toContain(`--import '${clearEnvironmentUrl}' "$@"`)
+    expect(node).toContain('--require "$runtime_clear_environment" "$@"')
     expect(node).not.toContain('npm_config_')
-    expect(readFileSync(installation.clearEnvironmentPath, 'utf8')).toContain(
-      "name.toUpperCase() === 'ELECTRON_RUN_AS_NODE'",
-    )
+    const clearEnvironment = readFileSync(installation.clearEnvironmentPath, 'utf8')
+    expect(clearEnvironment).toContain("process.execPath = require('node:path').join(__dirname, 'node-bin', 'node')")
+    expect(clearEnvironment).toContain("name.toUpperCase() === 'ELECTRON_RUN_AS_NODE'")
 
     expect(environment).toEqual({
       ...original,
@@ -127,14 +137,14 @@ describe('desktop Host pnpm runtime', () => {
     expect(environment).toEqual(original)
   })
 
-  it('clears every RunAsNode casing before the requested Node entry executes', () => {
+  it('publishes the POSIX shim as process.execPath and clears every RunAsNode casing', () => {
     const stateDir = join(temporaryDirectory(), 'runtime')
     const installation = installDesktopPnpmRuntime(options(stateDir, 'linux', { PATH: '/usr/bin' }))
     const result = spawnSync(process.execPath, [
       '--import',
       pathToFileURL(installation.clearEnvironmentPath).href,
       '-e',
-      'process.stdout.write(JSON.stringify(Object.keys(process.env).filter(name => name.toUpperCase() === "ELECTRON_RUN_AS_NODE")))',
+      'process.stdout.write(JSON.stringify({ execPath: process.execPath, runAsNode: Object.keys(process.env).filter(name => name.toUpperCase() === "ELECTRON_RUN_AS_NODE") }))',
     ], {
       encoding: 'utf8',
       env: {
@@ -146,7 +156,11 @@ describe('desktop Host pnpm runtime', () => {
 
     expect(result.error).toBeUndefined()
     expect(result.status).toBe(0)
-    expect(result.stdout).toBe('[]')
+    expect(JSON.parse(result.stdout)).toEqual({
+      // Node resolves the preload's __dirname through symlinks (macOS /var -> /private/var).
+      execPath: realpathSync(installation.nodeShimPath),
+      runAsNode: [],
+    })
     installation.dispose()
   })
 
@@ -178,7 +192,7 @@ describe('desktop Host pnpm runtime', () => {
 
     const command = process.platform === 'win32'
       ? process.env.ComSpec ?? 'cmd.exe'
-      : installation.pnpmShimPath
+      : 'pnpm'
     const args = process.platform === 'win32'
       ? ['/d', '/s', '/c', `""${installation.pnpmShimPath}" "${captureOutput}""`]
       : [captureOutput]
@@ -191,19 +205,81 @@ describe('desktop Host pnpm runtime', () => {
 
     expect(result.error).toBeUndefined()
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
-    expect(JSON.parse(readFileSync(captureOutput, 'utf8'))).toEqual({
+    const capture = JSON.parse(readFileSync(captureOutput, 'utf8')) as Record<string, unknown>
+    expect(capture).toMatchObject({
       ignoresMinimumReleaseAge: true,
-      runAsNode: [],
+      runAsNode: process.platform === 'win32' ? ['ELECTRON_RUN_AS_NODE'] : [],
       runtime: 'electron',
       target: '43.4.0',
       disturl: 'https://electronjs.org/headers',
-      node: installation.nodeShimPath,
-      path: `${installation.nodeBinDir}${pathDelimiter}${environment.PATH ?? ''}`,
     })
+    expect(resolve(String(capture.node))).toBe(resolve(installation.nodeShimPath))
+    const [capturedNodeBinDir, ...capturedPath] = String(capture.path).split(pathDelimiter)
+    expect(resolve(capturedNodeBinDir ?? '')).toBe(resolve(installation.nodeBinDir))
+    expect(capturedPath.join(pathDelimiter)).toBe(environment.PATH ?? '')
     expect(environment).not.toHaveProperty('ELECTRON_RUN_AS_NODE')
     expect(environment).not.toHaveProperty('npm_config_runtime')
     installation.dispose()
   })
+
+  it.runIf(process.platform === 'win32')(
+    'keeps process.execPath descendants in Electron Node mode on Windows',
+    () => {
+      const root = temporaryDirectory()
+      const childEntry = join(root, 'child.mjs')
+      const parentEntry = join(root, 'parent.mjs')
+      const output = join(root, 'result.json')
+      const electronExecutable = createRequire(import.meta.url)('electron') as string
+      writeFileSync(childEntry, [
+        "process.stdout.write('child-stdout')",
+        "process.stderr.write('child-stderr')",
+        'process.exitCode = 23',
+        '',
+      ].join('\n'))
+      writeFileSync(parentEntry, [
+        "import { spawnSync } from 'node:child_process'",
+        "import { writeFileSync } from 'node:fs'",
+        'const [childEntry, output] = process.argv.slice(2)',
+        "const child = spawnSync(process.execPath, [childEntry], { encoding: 'utf8', windowsHide: true })",
+        'writeFileSync(output, JSON.stringify({',
+        '  execPath: process.execPath,',
+        "  runAsNode: Object.keys(process.env).filter(name => name.toUpperCase() === 'ELECTRON_RUN_AS_NODE'),",
+        '  child: { status: child.status, stdout: child.stdout, stderr: child.stderr },',
+        '}))',
+        '',
+      ].join('\n'))
+      const installation = installDesktopPnpmRuntime({
+        ...options(join(root, 'runtime'), 'win32', { Path: process.env.Path }),
+        appExecutable: electronExecutable,
+        pnpmBinPath: parentEntry,
+      })
+
+      const result = spawnSync(electronExecutable, [
+        '--require',
+        installation.clearEnvironmentPath,
+        parentEntry,
+        childEntry,
+        output,
+      ], {
+        encoding: 'utf8',
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        timeout: 30_000,
+        windowsHide: true,
+      })
+
+      expect(result.error).toBeUndefined()
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+      const capture = JSON.parse(readFileSync(output, 'utf8')) as Record<string, unknown>
+      expect(resolve(String(capture.execPath))).toBe(resolve(electronExecutable))
+      expect(capture.runAsNode).toEqual(['ELECTRON_RUN_AS_NODE'])
+      expect(capture.child).toEqual({
+        status: 23,
+        stdout: 'child-stdout',
+        stderr: 'child-stderr',
+      })
+      installation.dispose()
+    },
+  )
 
   it('creates Windows batch shims without publishing the private Node directory', () => {
     const stateDir = join(temporaryDirectory(), 'runtime-state')
@@ -217,22 +293,26 @@ describe('desktop Host pnpm runtime', () => {
 
     expect(readdirSync(installation.pathDir)).toEqual(['pnpm.cmd'])
     expect(readdirSync(installation.nodeBinDir)).toEqual(['node.cmd'])
-    const clearEnvironmentUrl = pathToFileURL(installation.clearEnvironmentPath).href
-    const escapedClearEnvironmentUrl = clearEnvironmentUrl.replaceAll('%', '%%')
     const pnpm = readFileSync(installation.pnpmShimPath, 'utf8')
-    expect(pnpm).toContain(`set "PATH=${installation.nodeBinDir};%PATH%"`)
-    expect(pnpm).toContain(`set "NODE=${installation.nodeShimPath}"`)
+    expect(pnpm).toContain('set "DSH_RUNTIME_ROOT=%~dp0.."')
+    expect(pnpm).toContain('set "PATH=%DSH_RUNTIME_NODE_BIN%;%PATH%"')
+    expect(pnpm).toContain('set "NODE=%DSH_RUNTIME_NODE_BIN%\\node.cmd"')
     expect(pnpm).toContain('set "ELECTRON_RUN_AS_NODE=1"')
     expect(pnpm).toContain('set "npm_config_runtime=electron"')
     expect(pnpm).toContain('set "npm_config_target=43.4.0"')
-    expect(pnpm).toContain(`--import "${escapedClearEnvironmentUrl}"`)
-    expect(pnpm.indexOf(`--import "${escapedClearEnvironmentUrl}"`)).toBeLessThan(pnpm.indexOf('pnpm\\bin\\pnpm.mjs'))
+    expect(pnpm).toContain('--require "%DSH_RUNTIME_PRIVATE%\\clear-env.cjs"')
+    expect(pnpm.indexOf('--require "%DSH_RUNTIME_PRIVATE%\\clear-env.cjs"')).toBeLessThan(
+      pnpm.indexOf('pnpm\\bin\\pnpm.mjs'),
+    )
     expect(pnpm.match(/--config\.minimumReleaseAge=0/gu)).toHaveLength(1)
     expect(pnpm).toContain('--config.minimumReleaseAge=0 %*')
     const node = readFileSync(installation.nodeShimPath, 'utf8')
     expect(node).toContain('set "ELECTRON_RUN_AS_NODE=1"')
-    expect(node).toContain(`--import "${escapedClearEnvironmentUrl}" %*`)
+    expect(node).toContain('--require "%DSH_RUNTIME_PRIVATE%\\clear-env.cjs" %*')
     expect(node).not.toContain('npm_config_')
+    expect(readFileSync(installation.clearEnvironmentPath, 'utf8')).not.toContain(
+      "name.toUpperCase() === 'ELECTRON_RUN_AS_NODE'",
+    )
 
     expect(environment).toEqual({
       Path: `${installation.pathDir};C:\\Windows\\System32;C:\\Windows`,
@@ -259,6 +339,28 @@ describe('desktop Host pnpm runtime', () => {
     installation.dispose()
 
     expect(environment).toEqual({ PATH: `${laterPath}${pathDelimiter}${originalPath}` })
+  })
+
+  it('normalizes Windows separators and trailing separators when replacing legacy PATH entries', () => {
+    const root = temporaryDirectory()
+    const stateDir = join(root, 'runtime-commands')
+    const environment: NodeJS.ProcessEnv = { Path: 'C:\\Windows' }
+    const first = installDesktopPnpmRuntime(options(stateDir, 'win32', environment))
+    first.dispose()
+    const legacyPathDir = join(stateDir, 'bin')
+    mkdirSync(legacyPathDir, { recursive: true })
+    writeFileSync(join(legacyPathDir, 'bsk.exe'), 'legacy unknown command')
+    const legacyVariant = `${legacyPathDir.replaceAll('/', '\\')}\\`
+    const activeVariant = `${first.pathDir.replaceAll('/', '\\')}\\`
+    const systemPath = 'C:/Windows/System32/'
+    environment.Path = `"${legacyVariant}";"${activeVariant}";${systemPath}`
+
+    const second = installDesktopPnpmRuntime(options(stateDir, 'win32', environment))
+
+    expect(second.pathDir).toBe(first.pathDir)
+    expect(environment.Path).toBe(`${second.pathDir};${systemPath}`)
+    second.dispose()
+    expect(environment.Path).toBe(`"${legacyVariant}";"${activeVariant}";${systemPath}`)
   })
 
   it.runIf(process.platform === 'win32')('reclaims PATH precedence from an inherited Desktop terminal shim', () => {
@@ -306,17 +408,24 @@ describe('desktop Host pnpm runtime', () => {
     expect(environment).toEqual(original)
   })
 
-  it('does not duplicate or remove a runtime already first on PATH', () => {
+  it('reuses an exact immutable generation without rewriting it', () => {
     const stateDir = join(temporaryDirectory(), 'runtime')
-    const pathDir = join(stateDir, 'bin')
     const platform = process.platform === 'win32' ? 'win32' : 'linux'
     const originalPath = process.platform === 'win32' ? 'C:\\Windows' : '/usr/bin'
-    const environment: NodeJS.ProcessEnv = { PATH: `${pathDir}${pathDelimiter}${originalPath}` }
-    const installation = installDesktopPnpmRuntime(options(stateDir, platform, environment))
+    const environment: NodeJS.ProcessEnv = { PATH: originalPath }
+    const first = installDesktopPnpmRuntime(options(stateDir, platform, environment))
+    const firstStat = lstatSync(first.pnpmShimPath)
+    first.dispose()
+    environment.PATH = `${first.pathDir}${pathDelimiter}${originalPath}`
 
-    expect(environment.PATH).toBe(`${pathDir}${pathDelimiter}${originalPath}`)
-    installation.dispose()
-    expect(environment.PATH).toBe(`${pathDir}${pathDelimiter}${originalPath}`)
+    const second = installDesktopPnpmRuntime(options(stateDir, platform, environment))
+
+    expect(second.pathDir).toBe(first.pathDir)
+    expect(lstatSync(second.pnpmShimPath).ino).toBe(firstStat.ino)
+    expect(lstatSync(second.pnpmShimPath).mtimeMs).toBe(firstStat.mtimeMs)
+    expect(environment.PATH).toBe(`${first.pathDir}${pathDelimiter}${originalPath}`)
+    second.dispose()
+    expect(environment.PATH).toBe(`${first.pathDir}${pathDelimiter}${originalPath}`)
   })
 
   it('rejects symlinked state directories before changing PATH', () => {
@@ -324,7 +433,7 @@ describe('desktop Host pnpm runtime', () => {
     const target = join(root, 'target')
     const stateDir = join(root, 'runtime')
     mkdirSync(target)
-    symlinkSync(target, stateDir)
+    symlinkSync(target, stateDir, process.platform === 'win32' ? 'junction' : 'dir')
     const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
 
     expect(() => installDesktopPnpmRuntime(options(stateDir, 'linux', environment)))
@@ -332,89 +441,99 @@ describe('desktop Host pnpm runtime', () => {
     expect(environment).toEqual({ PATH: '/usr/bin' })
   })
 
-  it('rejects a symlinked generated file before changing PATH', () => {
+  it('publishes a clean sibling instead of trusting a contaminated generation', () => {
+    // POSIX PATH splitting cannot address drive-letter components; on Windows
+    // hosts the same scenario runs through the win32 platform shims.
+    const platform = process.platform === 'win32' ? 'win32' : 'linux'
+    const delimiter = platform === 'win32' ? ';' : ':'
     const root = temporaryDirectory()
     const stateDir = join(root, 'runtime')
-    const pathDir = join(stateDir, 'bin')
-    const privateDir = join(stateDir, 'private')
-    const nodeBinDir = join(privateDir, 'node-bin')
-    mkdirSync(pathDir, { recursive: true })
-    mkdirSync(nodeBinDir, { recursive: true })
+    const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
+    const first = installDesktopPnpmRuntime(options(stateDir, platform, environment))
+    first.dispose()
     const target = join(root, 'outside')
     writeFileSync(target, 'outside')
-    symlinkSync(target, join(pathDir, 'pnpm'))
-    const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
+    rmSync(first.pnpmShimPath)
+    try {
+      symlinkSync(target, first.pnpmShimPath)
+    } catch {
+      // Windows without Developer Mode cannot create file symlinks; the
+      // unknown executable below still contaminates the generation.
+    }
+    const unknownExecutable = join(first.pathDir, 'bsk.exe')
+    writeFileSync(unknownExecutable, 'locked or foreign')
+    environment.PATH = `${first.pathDir}${delimiter}/usr/bin`
 
-    expect(() => installDesktopPnpmRuntime(options(stateDir, 'linux', environment)))
-      .toThrow('not a regular file')
+    const second = installDesktopPnpmRuntime(options(stateDir, platform, environment))
+
+    expect(second.pathDir).not.toBe(first.pathDir)
+    expect(readdirSync(second.pathDir)).toEqual([platform === 'win32' ? 'pnpm.cmd' : 'pnpm'])
+    expect(environment.PATH).toBe(`${second.pathDir}${delimiter}/usr/bin`)
+    expect(readFileSync(unknownExecutable, 'utf8')).toBe('locked or foreign')
     expect(readFileSync(target, 'utf8')).toBe('outside')
-    expect(environment).toEqual({ PATH: '/usr/bin' })
+    second.dispose()
   })
 
-  it('recovers from stray command files instead of failing startup', () => {
+  it('leaves legacy unknown files untouched and excludes their directories from PATH', () => {
+    // POSIX PATH splitting cannot address drive-letter components; on Windows
+    // hosts the same scenario runs through the win32 platform shims.
+    const platform = process.platform === 'win32' ? 'win32' : 'linux'
+    const delimiter = platform === 'win32' ? ';' : ':'
     const root = temporaryDirectory()
     const stateDir = join(root, 'runtime')
-    const pathDir = join(stateDir, 'bin')
-    const nodeBinDir = join(stateDir, 'private', 'node-bin')
-    mkdirSync(pathDir, { recursive: true })
-    mkdirSync(nodeBinDir, { recursive: true })
-    writeFileSync(join(pathDir, 'dsh'), 'stray')
-    writeFileSync(join(nodeBinDir, 'dsh'), 'stray')
-    const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
-    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const legacyPathDir = join(stateDir, 'bin')
+    const legacyNodeBinDir = join(stateDir, 'private', 'node-bin')
+    mkdirSync(legacyPathDir, { recursive: true })
+    mkdirSync(legacyNodeBinDir, { recursive: true })
+    const publicUnknown = join(legacyPathDir, 'bsk.exe')
+    const privateUnknown = join(legacyNodeBinDir, 'bsk.exe')
+    writeFileSync(publicUnknown, 'locked public command')
+    writeFileSync(privateUnknown, 'locked private command')
+    const environment: NodeJS.ProcessEnv = {
+      PATH: `${legacyPathDir}${delimiter}${legacyNodeBinDir}${delimiter}/usr/bin`,
+    }
 
-    const installation = installDesktopPnpmRuntime(options(stateDir, 'linux', environment))
+    const installation = installDesktopPnpmRuntime(options(stateDir, platform, environment))
 
-    expect(readdirSync(pathDir)).toEqual(['pnpm'])
-    expect(readdirSync(nodeBinDir)).toEqual(['node'])
-    expect(environment.PATH).toBe(`${pathDir}:/usr/bin`)
-    expect(stderr).toHaveBeenCalledTimes(2)
+    expect(installation.pathDir).not.toBe(legacyPathDir)
+    expect(environment.PATH).toBe(`${installation.pathDir}${delimiter}/usr/bin`)
+    expect(readFileSync(publicUnknown, 'utf8')).toBe('locked public command')
+    expect(readFileSync(privateUnknown, 'utf8')).toBe('locked private command')
     installation.dispose()
   })
 
-  it('removes stray symlinks without touching their targets', () => {
+  it('does not attempt to delete a published generation that could still be locked', () => {
     const root = temporaryDirectory()
     const stateDir = join(root, 'runtime')
-    const pathDir = join(stateDir, 'bin')
-    mkdirSync(pathDir, { recursive: true })
-    const target = join(root, 'outside')
-    writeFileSync(target, 'outside')
-    symlinkSync(target, join(pathDir, 'dsh'))
-    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-
-    const installation = installDesktopPnpmRuntime(options(stateDir, 'linux', { PATH: '/usr/bin' }))
-
-    expect(readdirSync(pathDir)).toEqual(['pnpm'])
-    expect(readFileSync(target, 'utf8')).toBe('outside')
-    expect(stderr).toHaveBeenCalledOnce()
-    installation.dispose()
-  })
-
-  it('refuses an unexpected directory in the public command directory', () => {
-    const root = temporaryDirectory()
-    const stateDir = join(root, 'runtime')
-    const pathDir = join(stateDir, 'bin')
-    mkdirSync(join(pathDir, 'dsh'), { recursive: true })
     const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
+    const first = installDesktopPnpmRuntime(options(stateDir, 'linux', environment))
+    const firstRoot = dirname(first.pathDir)
+    first.dispose()
+    const originalRmSync = fs.rmSync
+    const rm = vi.spyOn(fs, 'rmSync').mockImplementation((filename, rmOptions) => {
+      if (filename === firstRoot) {
+        throw Object.assign(new Error('locked'), { code: 'EPERM' })
+      }
+      return originalRmSync(filename, rmOptions)
+    })
+    syncBuiltinESMExports()
 
-    expect(() => installDesktopPnpmRuntime(options(stateDir, 'linux', environment)))
-      .toThrow('contains an unexpected directory: dsh')
-    expect(environment).toEqual({ PATH: '/usr/bin' })
-  })
+    let second: ReturnType<typeof installDesktopPnpmRuntime> | undefined
+    try {
+      second = installDesktopPnpmRuntime({
+        ...options(stateDir, 'linux', environment),
+        electronVersion: '44.0.0',
+      })
+    } finally {
+      rm.mockRestore()
+      syncBuiltinESMExports()
+    }
 
-  it('removes only strictly named stale atomic files before validating commands', () => {
-    const root = temporaryDirectory()
-    const stateDir = join(root, 'runtime')
-    const pathDir = join(stateDir, 'bin')
-    mkdirSync(pathDir, { recursive: true })
-    const stale = join(pathDir, '.pnpm.123.123e4567-e89b-12d3-a456-426614174000.tmp')
-    writeFileSync(stale, 'partial')
-    const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
-
-    const installation = installDesktopPnpmRuntime(options(stateDir, 'linux', environment))
-
-    expect(readdirSync(pathDir)).toEqual(['pnpm'])
-    installation.dispose()
+    expect(second).toBeDefined()
+    expect(environment.PATH).toBe(`${second?.pathDir}:/usr/bin`)
+    expect(existsSync(firstRoot)).toBe(true)
+    expect(rm.mock.calls.some(([filename]) => filename === firstRoot)).toBe(false)
+    second?.dispose()
   })
 
   it('fails loud for unsupported platforms and unsafe generated values', () => {
@@ -429,6 +548,32 @@ describe('desktop Host pnpm runtime', () => {
 })
 
 describe('desktop Host dsh runtime', () => {
+  it('content-addresses Windows DSH shims and reuses an exact generation', () => {
+    const root = temporaryDirectory()
+    const stateDir = join(root, 'runtime')
+    const environment: NodeJS.ProcessEnv = { Path: 'C:\\Windows' }
+    const runtimeOptions = {
+      platform: 'win32' as const,
+      appExecutable: 'C:\\Program Files\\DSH Desktop\\DSH Desktop.exe',
+      dshBootstrapPath: 'C:\\Program Files\\DSH Desktop\\resources\\app.asar\\desktop-cli.js',
+      profileName: 'web',
+      homeDir: 'C:\\Users\\tester\\.dsh',
+      stateDir,
+      environment,
+    }
+
+    const first = installDesktopDshRuntime(runtimeOptions)
+    const firstRoot = dirname(first.pathDir)
+    first.dispose()
+    const second = installDesktopDshRuntime(runtimeOptions)
+
+    expect(second.pathDir).toBe(first.pathDir)
+    expect(readdirSync(second.pathDir)).toEqual(['dsh.cmd'])
+    expect(readdirSync(firstRoot).sort()).toEqual(['.generation.json', 'bin'])
+    expect(readFileSync(second.dshShimPath, 'utf8')).toContain('set "DSH_DESKTOP_DEFAULT_PROFILE=web"')
+    second.dispose()
+  })
+
   it.runIf(process.platform === 'win32')('makes the active profile available to Host plugin child processes', () => {
     const root = temporaryDirectory()
     const stateDir = join(root, 'runtime')

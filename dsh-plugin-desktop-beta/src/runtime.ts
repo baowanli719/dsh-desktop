@@ -67,6 +67,7 @@ export interface DesktopTraySubmenuItem {
 
 /** One effect-scoped command or submenu contributed to the native tray menu. */
 export interface DesktopTrayItem {
+  readonly id?: 'check-for-updates'
   /** Menu section used for deterministic ordering and separators. */
   group: DesktopTrayItemGroup
   /** Relative position inside the selected group. */
