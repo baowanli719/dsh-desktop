@@ -660,7 +660,9 @@ describe('ServerSkillProvider remote definitions', () => {
     const definition = await harness.provider.get(remoteCandidate(), {})
 
     expect(definition).toBeDefined()
-    expect(definition!.content).toBe('# Analyse new customers\nUse run_data_query.\n')
+    expect(definition!.content.startsWith('# Analyse new customers\nUse run_data_query.\n')).toBe(true)
+    expect(definition!.content).toContain('## Available query templates (call via `run_data_query`)')
+    expect(definition!.content).toContain('### `customer_summary`')
     expect(definition!.resourceBase).toBeUndefined()
     expect(definition!.path).toBeUndefined()
     expect(definition!.metadata).toEqual(expect.objectContaining({
@@ -736,6 +738,91 @@ describe('ServerSkillProvider remote definitions', () => {
 
     await expect(harness.provider.get(remoteCandidate(), {})).resolves.toBeUndefined()
     expect(harness.calls).toHaveLength(0)
+  })
+
+  it('appends the allowlisted MCP tools of a server-mcp skill to the skill content', async () => {
+    const harness = definitionHarness(() => definitionResponse({
+      runtimeType: 'server-mcp',
+      content: '# CRM lookup\n',
+      mcp: {
+        tools: [
+          {
+            name: 'mx_ashare_finance_data',
+            description: 'Query A-share market data',
+            inputSchema: { type: 'object', properties: { symbol: { type: 'string' } }, required: ['symbol'] },
+          },
+          { name: 'mx_index_block_finance_data' },
+          { name: '' },
+          'garbage',
+        ],
+      },
+    }))
+    const candidate = remoteCandidate({
+      locator: { kind: 'remote', name: 'customer-analysis', version: '2.0.0', runtimeType: 'server-mcp', revision: 'rev-1' },
+    })
+
+    const definition = await harness.provider.get(candidate, {})
+
+    expect(definition).toBeDefined()
+    expect(definition!.content).toContain('## Available tools (call via `run_mcp_skill`)')
+    expect(definition!.content).toContain('`skill` to `customer-analysis`')
+    expect(definition!.content).toContain('### `mx_ashare_finance_data`')
+    expect(definition!.content).toContain('Query A-share market data')
+    expect(definition!.content).toContain('"symbol"')
+    expect(definition!.content).toContain('### `mx_index_block_finance_data`')
+    expect(definition!.content).not.toContain('garbage')
+    // The data-query fixture section must not leak into a server-mcp listing.
+    expect(definition!.content).not.toContain('run_data_query')
+  })
+
+  it('appends the declared query templates and parameter shapes of a data-query skill', async () => {
+    const harness = definitionHarness(() => definitionResponse({
+      dataQuery: {
+        queries: [{
+          name: 'customer_summary',
+          description: 'Summarise customers',
+          params: [
+            { name: 'region', type: 'string', required: true, enum: ['east', 'west'], description: 'Sales region' },
+            { name: 'limit', type: 'number', required: false },
+          ],
+        }],
+      },
+    }))
+
+    const definition = await harness.provider.get(remoteCandidate(), {})
+
+    expect(definition).toBeDefined()
+    expect(definition!.content.startsWith('# Analyse new customers\nUse run_data_query.\n')).toBe(true)
+    expect(definition!.content).toContain('## Available query templates (call via `run_data_query`)')
+    expect(definition!.content).toContain('### `customer_summary`')
+    expect(definition!.content).toContain('Summarise customers')
+    expect(definition!.content).toContain('- `region` (string, required). Sales region Allowed: east, west.')
+    expect(definition!.content).toContain('- `limit` (number, optional).')
+  })
+
+  it('leaves the content untouched when the definition declares no tool surface', async () => {
+    const harness = definitionHarness(() => definitionResponse({ dataQuery: undefined, mcp: undefined }))
+
+    const definition = await harness.provider.get(remoteCandidate(), {})
+
+    expect(definition).toBeDefined()
+    expect(definition!.content).toBe('# Analyse new customers\nUse run_data_query.\n')
+  })
+
+  it('caps an oversized tool listing instead of failing the load', async () => {
+    const tools = Array.from({ length: 400 }, (_, index) => ({
+      name: `tool_${index}`,
+      description: 'x'.repeat(200),
+    }))
+    const harness = definitionHarness(() => definitionResponse({ runtimeType: 'server-mcp', mcp: { tools } }))
+    const candidate = remoteCandidate({
+      locator: { kind: 'remote', name: 'customer-analysis', version: '2.0.0', runtimeType: 'server-mcp', revision: 'rev-1' },
+    })
+
+    const definition = await harness.provider.get(candidate, {})
+
+    expect(definition).toBeDefined()
+    expect(definition!.content).toContain('[Tool listing truncated to stay within size limits.]')
   })
 })
 

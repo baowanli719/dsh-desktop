@@ -38,8 +38,10 @@ import {
   type GsServerRuntimeType,
   type GsSkillCatalogResponse,
   type GsSkillControl,
+  type GsSkillDefinitionResponse,
   type GsSkillExecutionKind,
   type GsSkillFilesResponse,
+  type GsSkillQueryParam,
   type GsSkillsResponse,
   type GsSkillViewItem,
 } from './server/gs-contract.ts'
@@ -318,6 +320,100 @@ export function safeSkillRelativePath(path: unknown): string[] | undefined {
 /** Strip the YAML frontmatter block a bundle entry may carry. */
 export function stripSkillFrontmatter(text: string): string {
   return text.replace(FRONTMATTER, '')
+}
+
+/** Character cap of the tool listing appended to a remote skill's content. */
+export const MAX_REMOTE_TOOL_LISTING_CHARS = 16 * 1024
+/** Per-entry description cap so one verbose entry cannot eat the whole listing. */
+const MAX_REMOTE_LISTING_DESCRIPTION_CHARS = 500
+/** Per-entry schema cap; oversized schemas are noted instead of embedded. */
+const MAX_REMOTE_LISTING_SCHEMA_CHARS = 4096
+
+/** Clip one free-text field from the server to a bounded single block. */
+function clipListingText(text: string, max: number): string {
+  const trimmed = text.trim()
+  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`
+}
+
+/**
+ * Render the tool surface of one server-executed skill definition as Markdown.
+ * A remote skill reaches the model only through its `SkillDefinition.content`
+ * (the `/skill` gesture and the `skill` tool both inject it verbatim), so the
+ * allowlisted tool names and argument shapes must ride along there; guessing
+ * them fails server-side with `invalid_arguments`. Returns an empty string
+ * when the definition declares no tool surface for its runtime type.
+ */
+export function renderRemoteToolListing(
+  skillName: string,
+  runtimeType: GsServerRuntimeType,
+  response: GsSkillDefinitionResponse,
+): string {
+  const sections: string[] = []
+  if (runtimeType === 'server-mcp' && response.mcp !== undefined && Array.isArray(response.mcp.tools)) {
+    const tools = response.mcp.tools.filter(tool =>
+      typeof tool === 'object' && tool !== null && typeof tool.name === 'string' && tool.name !== '')
+    if (tools.length > 0) {
+      const lines = [
+        '## Available tools (call via `run_mcp_skill`)',
+        '',
+        `Call these through the \`run_mcp_skill\` tool: set \`skill\` to \`${skillName}\`, \`tool\` to one of the names below, and \`arguments\` to match that tool's input schema. Use only the tool names listed here.`,
+      ]
+      for (const tool of tools) {
+        lines.push('', `### \`${tool.name}\``)
+        if (typeof tool.description === 'string' && tool.description.trim() !== '') {
+          lines.push(clipListingText(tool.description, MAX_REMOTE_LISTING_DESCRIPTION_CHARS))
+        }
+        if (tool.inputSchema !== undefined) {
+          const schema = JSON.stringify(tool.inputSchema)
+          lines.push(schema.length <= MAX_REMOTE_LISTING_SCHEMA_CHARS
+            ? `Input schema: ${schema}`
+            : 'Input schema: (too large to inline; start with no arguments and follow the server error guidance)')
+        }
+      }
+      sections.push(lines.join('\n'))
+    }
+  }
+  if (runtimeType === 'data-query' && response.dataQuery !== undefined && Array.isArray(response.dataQuery.queries)) {
+    const queries = response.dataQuery.queries.filter(query =>
+      typeof query === 'object' && query !== null && typeof query.name === 'string' && query.name !== '')
+    if (queries.length > 0) {
+      const lines = [
+        '## Available query templates (call via `run_data_query`)',
+        '',
+        `Call these through the \`run_data_query\` tool: set \`skill\` to \`${skillName}\`, \`query\` to one of the template names below, and \`params\` keyed by the declared parameter names. Use only the template names listed here.`,
+      ]
+      for (const query of queries) {
+        lines.push('', `### \`${query.name}\``)
+        if (typeof query.description === 'string' && query.description.trim() !== '') {
+          lines.push(clipListingText(query.description, MAX_REMOTE_LISTING_DESCRIPTION_CHARS))
+        }
+        const params = Array.isArray(query.params)
+          ? query.params.filter((param: GsSkillQueryParam) =>
+            typeof param === 'object' && param !== null && typeof param.name === 'string' && param.name !== '')
+          : []
+        if (params.length > 0) {
+          lines.push('Parameters:')
+          for (const param of params) {
+            const type = typeof param.type === 'string' && param.type !== '' ? param.type : 'unknown'
+            const requirement = param.required === true ? 'required' : 'optional'
+            const choices = Array.isArray(param.enum)
+              ? param.enum.filter((choice: unknown): choice is string => typeof choice === 'string')
+              : []
+            const allowed = choices.length > 0 ? ` Allowed: ${choices.join(', ')}.` : ''
+            const description = typeof param.description === 'string' && param.description.trim() !== ''
+              ? ` ${clipListingText(param.description, MAX_REMOTE_LISTING_DESCRIPTION_CHARS)}`
+              : ''
+            lines.push(`- \`${param.name}\` (${type}, ${requirement}).${description}${allowed}`)
+          }
+        }
+      }
+      sections.push(lines.join('\n'))
+    }
+  }
+  const listing = sections.join('\n\n')
+  return listing.length <= MAX_REMOTE_TOOL_LISTING_CHARS
+    ? listing
+    : `${listing.slice(0, MAX_REMOTE_TOOL_LISTING_CHARS)}\n\n[Tool listing truncated to stay within size limits.]`
 }
 
 /** Skill provider backed by gsclaw-server; never touches local skill roots. */
@@ -719,13 +815,15 @@ export class ServerSkillProvider implements SkillProvider {
       this.control.invalidate()
       return undefined
     }
+    const body = stripSkillFrontmatter(response.content)
+    const listing = renderRemoteToolListing(candidate.name, locator.runtimeType, response)
     const definition: SkillDefinition = {
       name: candidate.name,
       description: candidate.description,
       invocation: candidate.invocation,
       source: candidate.source,
       provider: candidate.provider,
-      content: stripSkillFrontmatter(response.content),
+      content: listing === '' ? body : body === '' ? listing : `${body}\n\n${listing}`,
       metadata: {
         ...(candidate.metadata ?? {}),
         execution: 'server',
