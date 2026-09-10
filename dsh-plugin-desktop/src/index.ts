@@ -448,6 +448,21 @@ export function apply(ctx: Context, config: Config): void {
             .map(summary => ({ name: summary.name, description: summary.description })),
       }
     }
+    // POST responses read the tracker snapshot directly: a successful
+    // setEnabled has already refreshed it, and answering through the registry
+    // would force a full server re-sync (plus a syncedAt bump) on every toggle.
+    const readGsSkillsSnapshot = (): GsSkillsView => {
+      const state = ctx.get('gsSkillSync')?.snapshot()
+      if (state === undefined) return { status: 'idle', skills: [] }
+      return {
+        status: state.status,
+        ...(state.syncedAt === undefined ? {} : { syncedAt: state.syncedAt }),
+        ...(state.execution === undefined ? {} : { execution: state.execution }),
+        ...(state.masterOff === undefined ? {} : { masterOff: state.masterOff }),
+        ...(state.switchedOff === undefined ? {} : { switchedOff: state.switchedOff }),
+        skills: state.skills ?? [],
+      }
+    }
     ctx.effect(
       () => ctx.webServer.register({
         kind: 'exact',
@@ -458,7 +473,7 @@ export function apply(ctx: Context, config: Config): void {
             const sync = ctx.get('gsSkillSync')
             if (sync?.setEnabled === undefined) throw new Error('skill provider unavailable')
             await sync.setEnabled(name, enabled)
-          })
+          }, readGsSkillsSnapshot)
         },
       }),
       `dsh-plugin-desktop: private gs-server route ${GS_SERVER_SKILLS_PATH}`,

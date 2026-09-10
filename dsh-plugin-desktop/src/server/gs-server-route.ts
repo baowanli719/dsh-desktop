@@ -204,6 +204,10 @@ export async function handleGsSkillsRequest(
   readSkillsView: () => Promise<GsSkillsView>,
   reportError: ReportError = () => {},
   setEnabled?: (name: string, enabled: boolean) => Promise<void>,
+  // The POST response reads the tracker snapshot directly: setEnabled already
+  // refreshed it, and a registry re-list here would force a full server
+  // re-sync (and a syncedAt bump) on every toggle.
+  readSkillsSnapshot?: () => GsSkillsView,
 ): Promise<void> {
   if (req.method !== 'GET' && !(req.method === 'POST' && setEnabled !== undefined)) return finishJson(res, 405, error('method not allowed'), 'GET')
   if (!isSameOriginLoopbackRequest(req, expectedOrigin, req.method === 'POST')) {
@@ -223,6 +227,7 @@ export async function handleGsSkillsRequest(
         return finishJson(res, 409, error('skill unavailable'))
       }
       await setEnabled?.(body.name, body.enabled)
+      if (readSkillsSnapshot !== undefined) return finishJson(res, 200, readSkillsSnapshot())
     }
     finishJson(res, 200, await readSkillsView())
   } catch (cause) {

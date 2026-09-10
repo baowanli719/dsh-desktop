@@ -22,7 +22,7 @@ import {
   readDesktopSettingsUntilLanSettled,
   resolveDesktopLanConfirmation,
 } from '../src/client/DesktopSettingsSection.tsx'
-import { DesktopSkillsSection } from '../src/client/DesktopSkillsSection.tsx'
+import { DesktopSkillsSection, DesktopSkillToggleRow, type DesktopSkillToggleRowProps } from '../src/client/DesktopSkillsSection.tsx'
 import { DesktopAboutSection } from '../src/client/DesktopAboutSection.tsx'
 import { DesktopAccountMenu } from '../src/client/DesktopAccountMenu.tsx'
 import { DesktopTerminalSettingsAction } from '../src/client/DesktopTerminalSettingsAction.tsx'
@@ -743,5 +743,39 @@ describe('Desktop settings Slot registration', () => {
     expect(actionComponent).toBe(DesktopTerminalSettingsAction)
     await control.setMode('extended')
     expect(scope.set).toHaveBeenCalledWith('mode', 'extended')
+  })
+})
+
+describe('DesktopSkillToggleRow', () => {
+  const t = ((key: DesktopSettingsLocaleKey): string => en[key]) as unknown as DesktopSkillToggleRowProps['t']
+  const row = (overrides: Record<string, unknown> = {}) => renderToStaticMarkup(createElement(DesktopSkillToggleRow, {
+    skill: { name: 'crm-lookup', description: 'Lookup customers', enabled: true },
+    pending: false,
+    disabled: false,
+    t,
+    onToggle: vi.fn(),
+    ...overrides,
+  }))
+
+  it('renders the activation control as a sliding switch, not a checkbox', () => {
+    const markup = row()
+
+    expect(markup).toContain('role="switch"')
+    expect(markup).toContain('class="dshDesktopSettingsToggle"')
+    expect(markup).toContain('dshDesktopSettingsToggleKnob')
+    expect(markup).toContain('aria-checked="true"')
+    expect(markup).toContain('aria-label="crm-lookup"')
+    expect(markup).not.toContain('type="checkbox"')
+    expect(markup).not.toContain('disabled')
+  })
+
+  it('reflects off, pending, and disabled states on the switch itself', () => {
+    expect(row({ skill: { name: 'crm-lookup', description: 'Lookup customers', enabled: false } }))
+      .toContain('aria-checked="false"')
+    // enabled undefined falls back to the delivered default: on.
+    expect(row({ skill: { name: 'crm-lookup', description: 'Lookup customers' } }))
+      .toContain('aria-checked="true"')
+    expect(row({ pending: true })).toContain('disabled=""')
+    expect(row({ disabled: true })).toContain('disabled=""')
   })
 })

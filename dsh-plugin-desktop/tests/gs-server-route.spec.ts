@@ -92,4 +92,22 @@ describe('gs-server skill preference route', () => {
       expect(set).not.toHaveBeenCalled()
     }
   })
+
+  it('answers a successful POST from the tracker snapshot without a second registry list', async () => {
+    const { res, end } = response()
+    const full = vi.fn(read)
+    const snapshotView = { status: 'ok' as const, skills: [{ name: 'review', description: '', enabled: true }] }
+    const snapshot = vi.fn(() => snapshotView)
+    const set = vi.fn(async () => {})
+
+    await handleGsSkillsRequest(skillRequest({ name: 'review', enabled: true }), res, ORIGIN, full, vi.fn(), set, snapshot)
+
+    expect(res.statusCode).toBe(200)
+    expect(set).toHaveBeenCalledWith('review', true)
+    // The registry list runs once for the pre-check; the response comes from
+    // the tracker snapshot so a toggle never forces a server re-sync.
+    expect(full).toHaveBeenCalledTimes(1)
+    expect(snapshot).toHaveBeenCalledTimes(1)
+    expect(end).toHaveBeenCalledWith(JSON.stringify(snapshotView))
+  })
 })
