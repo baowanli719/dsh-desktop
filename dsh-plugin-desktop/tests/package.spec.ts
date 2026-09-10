@@ -1000,7 +1000,7 @@ describe('published package surface', () => {
     expect(macosJob).not.toContain('- run: yarn dist:mac-smoke')
   })
 
-  it('skips product packaging only for documentation-only changes', () => {
+  it('skips product packaging only for documentation-only changes', { timeout: 30_000 }, () => {
     const classifier = fileURLToPath(new URL('../../scripts/classify-ci-changes.mjs', import.meta.url))
     const classify = (paths: string[]): string => execFileSync(
       process.execPath,

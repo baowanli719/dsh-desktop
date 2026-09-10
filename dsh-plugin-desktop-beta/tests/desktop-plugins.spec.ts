@@ -473,8 +473,16 @@ describe('desktop direct bundle management', () => {
     rmSync(options.statePath)
     const target = join(root, 'real-state.json')
     writeFileSync(target, JSON.stringify({ version: 1, profiles: [] }))
-    symlinkSync(target, options.statePath)
-    expect(() => readDesktopDisabledBundles(options.statePath, 'desktop')).toThrow('regular file')
+    let linked = true
+    try {
+      symlinkSync(target, options.statePath)
+    } catch {
+      // Windows without Developer Mode cannot create file symlinks.
+      linked = false
+    }
+    if (linked) {
+      expect(() => readDesktopDisabledBundles(options.statePath, 'desktop')).toThrow('regular file')
+    }
 
     rmSync(options.statePath)
     const parentFile = join(root, 'not-a-directory')

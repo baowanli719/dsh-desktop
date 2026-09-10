@@ -303,7 +303,12 @@ describe('Desktop Setup Wizard state', () => {
       mode: 0o700,
     })
     writeFileSync(outside, 'outside\n', { mode: 0o600 })
-    symlinkSync(outside, statePath)
+    try {
+      symlinkSync(outside, statePath)
+    } catch {
+      // Windows without Developer Mode cannot create file symlinks.
+      return
+    }
 
     expect(() => readDesktopSetupWizardState(userData, profile)).toThrow('regular file')
     await expect(recordSetup(userData, profile, 'completed')).rejects.toThrow('regular file')

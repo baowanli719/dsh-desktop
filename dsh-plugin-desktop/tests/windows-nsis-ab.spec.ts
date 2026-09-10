@@ -154,7 +154,7 @@ describe('Windows NSIS A/B packaging', () => {
     )
     expect(calls[3]?.args).toContain('--reverse')
     expect(calls[3]?.args).toContain('--unsafe-paths')
-    expect(calls[3]?.args).toContain('--directory=.')
+    expect(calls[3]?.args).not.toContain('--directory=.')
     expect(calls[3]?.args).toContain('--include=templates/nsis/include/extractAppPackage.nsh')
     expect(calls[3]?.env.GIT_CEILING_DIRECTORIES)
       .toBe(join(options.outputRoot, '.staged-builder', 'node_modules'))
@@ -265,7 +265,6 @@ describe('Windows NSIS A/B packaging', () => {
       'apply',
       '--reverse',
       '--unsafe-paths',
-      '--directory=.',
       '--include=templates/nsis/include/extractAppPackage.nsh',
       fileURLToPath(new URL('../../patches/app-builder-lib@26.15.7.patch', import.meta.url)),
     ], {

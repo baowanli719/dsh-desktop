@@ -165,7 +165,7 @@ describe('final Electron fuse verification', () => {
     expect(() => resolveFinalPackagedRuntimeContexts(
       result([{ key: 'win', archs: [Arch.x64, Arch.arm64] }]),
       filename => filename === x64Executable,
-    )).toThrow('win/arm64 at /build/win-arm64-unpacked/DSH Desktop Beta.exe')
+    )).toThrow(`win/arm64 at ${join('/build', 'win-arm64-unpacked', 'DSH Desktop Beta.exe')}`)
   })
 
   it('resolves a real target-name map through the target archs retained by NSIS', () => {

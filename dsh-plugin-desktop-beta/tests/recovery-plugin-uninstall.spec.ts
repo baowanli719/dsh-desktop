@@ -153,6 +153,15 @@ describe('pre-Host recovery plugin uninstall command', () => {
       environment: {
         PATH: systemBin,
         PNPM_SELECTION_MARKER: selectedMarker,
+        // The packaged CLI spawns pnpm through cmd.exe on Windows; the
+        // isolated environment must still address the system shell.
+        ...(process.platform === 'win32'
+          ? {
+              ComSpec: process.env.ComSpec ?? process.env.comspec,
+              PATHEXT: process.env.PATHEXT,
+              SystemRoot: process.env.SystemRoot,
+            }
+          : {}),
       },
     })).resolves.toMatchObject({ exitCode: 0 })
 

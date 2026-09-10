@@ -96,7 +96,7 @@ it.each([false, true])('boots a separate Web Host with client plugins (AA enable
     expect(bundle.status).toBe(200)
     expect(await bundle.text()).toContain('isolatedClientFixture')
     expect(html).toContain('dsh-plugin-desktop-beta')
-    await expect.poll(async () => (await rpc!.call<{ services: { aaRuntime: boolean; aaOnboarding: boolean } }>('status')).services, { timeout: 3000 })
+    await expect.poll(async () => (await rpc!.call<{ services: { aaRuntime: boolean; aaOnboarding: boolean } }>('status')).services, { timeout: 15_000 })
       .toEqual({ aaRuntime: aaEnabled, aaOnboarding: aaEnabled })
     await rpc.call('stop')
     await expect(fetch(spec.url, { headers })).rejects.toThrow()

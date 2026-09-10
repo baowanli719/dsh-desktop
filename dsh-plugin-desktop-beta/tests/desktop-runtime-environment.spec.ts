@@ -433,7 +433,7 @@ describe('desktop Host pnpm runtime', () => {
     const target = join(root, 'target')
     const stateDir = join(root, 'runtime')
     mkdirSync(target)
-    symlinkSync(target, stateDir)
+    symlinkSync(target, stateDir, process.platform === 'win32' ? 'junction' : 'dir')
     const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
 
     expect(() => installDesktopPnpmRuntime(options(stateDir, 'linux', environment)))
@@ -442,30 +442,43 @@ describe('desktop Host pnpm runtime', () => {
   })
 
   it('publishes a clean sibling instead of trusting a contaminated generation', () => {
+    // POSIX PATH splitting cannot address drive-letter components; on Windows
+    // hosts the same scenario runs through the win32 platform shims.
+    const platform = process.platform === 'win32' ? 'win32' : 'linux'
+    const delimiter = platform === 'win32' ? ';' : ':'
     const root = temporaryDirectory()
     const stateDir = join(root, 'runtime')
     const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }
-    const first = installDesktopPnpmRuntime(options(stateDir, 'linux', environment))
+    const first = installDesktopPnpmRuntime(options(stateDir, platform, environment))
     first.dispose()
     const target = join(root, 'outside')
     writeFileSync(target, 'outside')
     rmSync(first.pnpmShimPath)
-    symlinkSync(target, first.pnpmShimPath)
+    try {
+      symlinkSync(target, first.pnpmShimPath)
+    } catch {
+      // Windows without Developer Mode cannot create file symlinks; the
+      // unknown executable below still contaminates the generation.
+    }
     const unknownExecutable = join(first.pathDir, 'bsk.exe')
     writeFileSync(unknownExecutable, 'locked or foreign')
-    environment.PATH = `${first.pathDir}:/usr/bin`
+    environment.PATH = `${first.pathDir}${delimiter}/usr/bin`
 
-    const second = installDesktopPnpmRuntime(options(stateDir, 'linux', environment))
+    const second = installDesktopPnpmRuntime(options(stateDir, platform, environment))
 
     expect(second.pathDir).not.toBe(first.pathDir)
-    expect(readdirSync(second.pathDir)).toEqual(['pnpm'])
-    expect(environment.PATH).toBe(`${second.pathDir}:/usr/bin`)
+    expect(readdirSync(second.pathDir)).toEqual([platform === 'win32' ? 'pnpm.cmd' : 'pnpm'])
+    expect(environment.PATH).toBe(`${second.pathDir}${delimiter}/usr/bin`)
     expect(readFileSync(unknownExecutable, 'utf8')).toBe('locked or foreign')
     expect(readFileSync(target, 'utf8')).toBe('outside')
     second.dispose()
   })
 
   it('leaves legacy unknown files untouched and excludes their directories from PATH', () => {
+    // POSIX PATH splitting cannot address drive-letter components; on Windows
+    // hosts the same scenario runs through the win32 platform shims.
+    const platform = process.platform === 'win32' ? 'win32' : 'linux'
+    const delimiter = platform === 'win32' ? ';' : ':'
     const root = temporaryDirectory()
     const stateDir = join(root, 'runtime')
     const legacyPathDir = join(stateDir, 'bin')
@@ -477,13 +490,13 @@ describe('desktop Host pnpm runtime', () => {
     writeFileSync(publicUnknown, 'locked public command')
     writeFileSync(privateUnknown, 'locked private command')
     const environment: NodeJS.ProcessEnv = {
-      PATH: `${legacyPathDir}:${legacyNodeBinDir}:/usr/bin`,
+      PATH: `${legacyPathDir}${delimiter}${legacyNodeBinDir}${delimiter}/usr/bin`,
     }
 
-    const installation = installDesktopPnpmRuntime(options(stateDir, 'linux', environment))
+    const installation = installDesktopPnpmRuntime(options(stateDir, platform, environment))
 
     expect(installation.pathDir).not.toBe(legacyPathDir)
-    expect(environment.PATH).toBe(`${installation.pathDir}:/usr/bin`)
+    expect(environment.PATH).toBe(`${installation.pathDir}${delimiter}/usr/bin`)
     expect(readFileSync(publicUnknown, 'utf8')).toBe('locked public command')
     expect(readFileSync(privateUnknown, 'utf8')).toBe('locked private command')
     installation.dispose()
