@@ -561,6 +561,7 @@ describe('packaged desktop runtime verification', () => {
   })
 
   it('keeps the reviewed smart-unpack surface explicit', () => {
+    expect(ALLOWED_SMART_UNPACK_PACKAGE_ROOTS).toContain('node_modules/dsh-better-sidebar')
     expect(ALLOWED_SMART_UNPACK_PACKAGE_ROOTS).toContain('node_modules/fs-ext')
     expect(ALLOWED_SMART_UNPACK_PACKAGE_ROOTS).toContain('node_modules/node-pty')
     expect(ALLOWED_SMART_UNPACK_PACKAGE_ROOTS).toContain('node_modules/pnpm')

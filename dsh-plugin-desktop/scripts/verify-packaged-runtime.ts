@@ -77,6 +77,8 @@ export const MAX_PNPM_SMART_UNPACK_BYTES = 32 * 1024 * 1024
 
 /** Package roots electron-builder may smart-unpack as one indivisible unit. */
 export const ALLOWED_SMART_UNPACK_PACKAGE_ROOTS = [
+  // The office sidebar bundles its own node-pty prebuilds for the terminal pane.
+  'node_modules/dsh-better-sidebar',
   'node_modules/fs-ext',
   'node_modules/koffi',
   'node_modules/node-addon-require-builtin',
