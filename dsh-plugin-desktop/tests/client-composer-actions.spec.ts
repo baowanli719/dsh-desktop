@@ -93,6 +93,42 @@ describe('desktop composer plus actions', () => {
     ])
     expect(source.onPick(pick(skills[0]!))).toEqual({ text: '/meeting-notes ' })
   })
+
+  it('hides disabled and unavailable skills from the picker', async () => {
+    const source = createDesktopComposerActionSource({
+      openFiles: vi.fn(),
+      readSkills: async () => ({
+        status: 'ok' as const,
+        skills: [
+          { name: 'meeting-notes', displayName: '会议纪要', description: '整理会议纪要' },
+          { name: 'crm-lookup', description: 'switched off', enabled: false },
+          { name: 'mystery', description: 'unsupported', available: false },
+        ],
+      }),
+    })
+
+    const skills = await source.candidates(session, request({ query: DESKTOP_SKILL_MENU_PREFIX }))
+
+    expect(skills).toEqual([{
+      name: '会议纪要',
+      description: '整理会议纪要',
+      value: 'meeting-notes',
+    }])
+  })
+
+  it('shows the empty placeholder when every delivered skill is disabled', async () => {
+    const source = createDesktopComposerActionSource({
+      openFiles: vi.fn(),
+      readSkills: async () => ({
+        status: 'ok' as const,
+        skills: [{ name: 'crm-lookup', description: '', enabled: false }],
+      }),
+    })
+
+    const skills = await source.candidates(session, request({ query: DESKTOP_SKILL_MENU_PREFIX }))
+
+    expect(skills).toEqual([expect.objectContaining({ name: '暂无可用技能' })])
+  })
 })
 
 describe('attachComposerFiles', () => {

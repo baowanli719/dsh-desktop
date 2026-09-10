@@ -173,9 +173,13 @@ export function createDesktopComposerActionSource(
       if (request.query.startsWith(DESKTOP_SKILL_MENU_PREFIX)) {
         const view = await deps.readSkills()
         if (request.signal.aborted) return []
-        if (view.status !== 'ok' || view.skills.length === 0) return [unavailableSkill(view)]
+        if (view.status !== 'ok') return [unavailableSkill(view)]
         const query = request.query.slice(DESKTOP_SKILL_MENU_PREFIX.length).toLocaleLowerCase()
-        return view.skills
+        // The skills view is the settings-page projection and deliberately
+        // carries disabled and unavailable entries; the picker must not offer
+        // skills the user switched off or the desktop cannot execute.
+        const candidates = view.skills
+          .filter(skill => skill.enabled !== false && skill.available !== false)
           .filter(skill => skill.name.toLocaleLowerCase().includes(query)
             || (skill.displayName?.toLocaleLowerCase().includes(query) ?? false))
           .map(skill => ({
@@ -183,6 +187,7 @@ export function createDesktopComposerActionSource(
             description: skill.description,
             value: skill.name,
           }))
+        return candidates.length === 0 && query === '' ? [unavailableSkill(view)] : candidates
       }
 
       const query = request.query.toLocaleLowerCase()
