@@ -323,6 +323,7 @@ describe('Desktop settings API', () => {
           openBrowser: true,
           networkExposure: 'lan' as const,
           logLevel: 'info' as const,
+          headerCornerGap: 16,
         },
         base: undefined,
         user: undefined,

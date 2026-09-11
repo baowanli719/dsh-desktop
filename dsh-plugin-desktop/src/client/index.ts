@@ -16,6 +16,7 @@ import { applyDesktopBrand } from './desktop-brand.tsx'
 import { applyDesktopSettings } from './desktop-settings.ts'
 import { installDesktopDirectoryPickerBridge } from './directory-picker.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
+import { installHeaderCornerGap } from './header-corner-gap.ts'
 import { installDesktopPermissionLabels } from './permission-labels.ts'
 import { installSessionLogButtonVisibility } from './session-log-button.ts'
 import { installDesktopTerminalDeliverables } from './terminal-deliverables.ts'
@@ -81,6 +82,7 @@ export {
 } from './boot-health.ts'
 export type { RendererBootLoader, RendererBootReport } from './boot-health.ts'
 export { parseDesktopClientEnvironment } from './environment.ts'
+export { applyHeaderCornerGap, installHeaderCornerGap } from './header-corner-gap.ts'
 export {
   applySessionLogButtonVisibility,
   installSessionLogButtonVisibility,
@@ -158,6 +160,10 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(
     () => installSessionLogButtonVisibility(ctx),
     'dsh-plugin-desktop: session log button visibility',
+  )
+  ctx.effect(
+    () => installHeaderCornerGap(ctx),
+    'dsh-plugin-desktop: header corner gap',
   )
   // Publish the server-delivered brand before the conversation plugin mounts;
   // the patched hero reads the global and falls back to its locale dictionary.

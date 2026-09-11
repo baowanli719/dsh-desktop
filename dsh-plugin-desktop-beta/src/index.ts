@@ -127,6 +127,8 @@ export interface DesktopSettings {
   networkExposure: DesktopNetworkExposure
   /** Log verbosity threshold applied to the file logger. */
   logLevel: 'debug' | 'info' | 'warn' | 'error'
+  /** Gap in px between the session header utilities and the corner control. */
+  headerCornerGap: number
 }
 
 /** Schema registered with the standard settings service. */
@@ -138,6 +140,7 @@ export const DesktopSettingsSchema: z<DesktopSettings> = z.object({
   openBrowser: z.boolean().default(false),
   networkExposure: z.union(['loopback', 'lan'] as const).default('loopback'),
   logLevel: z.union(['debug', 'info', 'warn', 'error'] as const).default('info'),
+  headerCornerGap: z.number().step(1).min(8).max(24).default(16),
 })
 
 /** Native window configuration. */

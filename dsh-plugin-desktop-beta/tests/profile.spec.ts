@@ -389,7 +389,7 @@ virtualStoreDirMaxLength: 60
     })
     expect(inserted).toContainEqual(expect.objectContaining({
       name: DESKTOP_PACKAGE_NAME,
-      config: { mode: 'compatibility' },
+      config: { mode: 'compatibility', headerCornerGap: 16 },
     }))
     expect(patches).toContainEqual(expect.objectContaining({
       id: 'webserver',

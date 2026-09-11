@@ -185,6 +185,7 @@ function createHarness(
         networkExposure: config.networkExposure,
         logLevel: 'info' as const,
         sessionLogButton: false,
+        headerCornerGap: 16,
       }),
       watch: (callback: typeof watcher) => {
         watcher = callback
@@ -261,6 +262,7 @@ describe('desktop Host plugin', () => {
       networkExposure: 'loopback',
       logLevel: 'info',
       sessionLogButton: false,
+      headerCornerGap: 16,
     })
     expect(() => DesktopSettingsSchema({ port: -1 } as DesktopSettings)).toThrow()
     expect(() => DesktopSettingsSchema({ port: 1.5 } as DesktopSettings)).toThrow()
@@ -559,15 +561,15 @@ describe('desktop Host plugin', () => {
     apply(harness.ctx, config)
 
     await harness.notify(
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
     )
     expect(harness.restart).not.toHaveBeenCalled()
 
     harness.restart.mockImplementation(() => new Promise<void>(() => {}))
     await harness.notify(
-      { mode: 'advanced', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
+      { mode: 'advanced', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
     )
     await vi.runAllTimersAsync()
     expect(harness.restart).toHaveBeenCalledOnce()
@@ -580,8 +582,8 @@ describe('desktop Host plugin', () => {
     harness.restart.mockImplementation(() => new Promise<void>(() => {}))
 
     await harness.notify(
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'off', port: 43_120, openBrowser: true, networkExposure: 'lan', logLevel: 'info', sessionLogButton: false },
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'off', port: 43_120, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'off', port: 43_120, openBrowser: true, networkExposure: 'lan', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'off', port: 43_120, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
     )
     await vi.runAllTimersAsync()
     expect(harness.restart).not.toHaveBeenCalled()
@@ -591,8 +593,8 @@ describe('desktop Host plugin', () => {
     const enabledHarness = createHarness('darwin', true)
     apply(enabledHarness.ctx, config)
     await enabledHarness.notify(
-      { mode: 'advanced', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 43_120, openBrowser: true, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 43_120, openBrowser: true, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
+      { mode: 'advanced', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 43_120, openBrowser: true, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 43_120, openBrowser: true, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
     )
     await vi.runAllTimersAsync()
     expect(enabledHarness.restart).toHaveBeenCalledOnce()
@@ -606,15 +608,15 @@ describe('desktop Host plugin', () => {
     apply(harness.ctx, config)
 
     await harness.notify(
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'debug', sessionLogButton: false },
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'debug', sessionLogButton: false, headerCornerGap: 16 },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
     )
     expect(harness.restart).not.toHaveBeenCalled()
 
     harness.restart.mockImplementation(() => new Promise<void>(() => {}))
     await harness.notify(
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 43_189, openBrowser: false, networkExposure: 'loopback', logLevel: 'debug', sessionLogButton: false },
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'debug', sessionLogButton: false },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 43_189, openBrowser: false, networkExposure: 'loopback', logLevel: 'debug', sessionLogButton: false, headerCornerGap: 16 },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'debug', sessionLogButton: false, headerCornerGap: 16 },
     )
     await vi.runAllTimersAsync()
     expect(harness.restart).toHaveBeenCalledOnce()
@@ -627,8 +629,8 @@ describe('desktop Host plugin', () => {
 
     harness.restart.mockImplementation(() => new Promise<void>(() => {}))
     await harness.notify(
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'mica', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
-      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'mica', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
+      { mode: 'compatibility', macosMaterial: 'transparent', windowsMaterial: 'acrylic', port: 0, openBrowser: false, networkExposure: 'loopback', logLevel: 'info', sessionLogButton: false, headerCornerGap: 16 },
     )
     await vi.runAllTimersAsync()
 
@@ -686,6 +688,7 @@ describe('desktop Host plugin', () => {
       networkExposure: 'loopback',
       logLevel: 'info',
       sessionLogButton: false,
+      headerCornerGap: 16,
     }
     expect(() => options?.validate?.({ ...settings, mode: 'advanced' })).toThrow(
       'supported on macOS and Windows',
@@ -720,6 +723,7 @@ describe('desktop Host plugin', () => {
       networkExposure: 'lan',
       logLevel: 'info',
       sessionLogButton: false,
+      headerCornerGap: 16,
     })).not.toThrow()
   })
 })

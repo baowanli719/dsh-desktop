@@ -504,8 +504,16 @@ body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extende
   padding-top: 20px;
   padding-right: 78px;
 }
-body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"][data-dsh-sidebar-collapsed] [data-slot="conversation"] header {
+/* With the right panel hidden the header reaches the window's right edge, whose
+   top corner the caption strip overlays; keep the trailing controls clear of
+   it. Key off the panel's own open marker — no document attribute tracks it. */
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"]:not(:has([data-sidebar-right-open])) [data-slot="conversation"] header {
   padding-right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 12}px;
+}
+/* The open right panel's tab strip ends at that same corner; reserve the
+   caption width so its chrome buttons stay clear of the caption strip. */
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [data-sidebar-right-panel] [data-dockkit-strip] {
+  padding-right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 6}px;
 }
 /* Include header padding and the space around tabs, not just the title row.
    The sidebar brand row is anchored through its public slot; its buttons keep

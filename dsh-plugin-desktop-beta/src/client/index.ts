@@ -14,6 +14,7 @@ import { applyDesktopSettings } from './desktop-settings.ts'
 import { installDesktopDirectoryPickerBridge } from './directory-picker.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { applyExtendedShell } from './extended-shell.ts'
+import { installHeaderCornerGap } from './header-corner-gap.ts'
 import { desktopWindowService, provideDesktopWindow } from './window-service.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
@@ -54,6 +55,7 @@ export {
 } from './boot-health.ts'
 export type { RendererBootLoader, RendererBootReport } from './boot-health.ts'
 export { parseDesktopClientEnvironment } from './environment.ts'
+export { applyHeaderCornerGap, installHeaderCornerGap } from './header-corner-gap.ts'
 export type {
   DesktopClientEnvironment,
   DesktopClientMaterial,
@@ -88,6 +90,10 @@ export function apply(ctx: ClientContext): void {
     'dsh-plugin-desktop: native window geometry service',
   )
   const desktopSettings = applyDesktopSettings(ctx, environment)
+  ctx.effect(
+    () => installHeaderCornerGap(ctx),
+    'dsh-plugin-desktop: header corner gap',
+  )
   ctx.effect(
     () => startRendererBootReporter(ctx.loader),
     'dsh-plugin-desktop: renderer boot health report',

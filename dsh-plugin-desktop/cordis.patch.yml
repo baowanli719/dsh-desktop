@@ -6,6 +6,7 @@
       config:
         mode: compatibility
         sessionLogButton: false
+        headerCornerGap: 16
     - id: desktop-terminal
       name: dsh-plugin-desktop/terminal
       disabled: !!js process.platform === 'linux'

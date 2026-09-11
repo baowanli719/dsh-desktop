@@ -5,6 +5,7 @@
       name: dsh-plugin-desktop-beta
       config:
         mode: compatibility
+        headerCornerGap: 16
     - id: desktop-terminal
       name: dsh-plugin-desktop-beta/terminal
       disabled: !!js process.platform === 'linux'

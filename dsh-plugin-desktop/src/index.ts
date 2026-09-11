@@ -163,6 +163,8 @@ export interface DesktopSettings {
   logLevel: 'debug' | 'info' | 'warn' | 'error'
   /** Whether the session header shows the upstream session-log export action. */
   sessionLogButton: boolean
+  /** Gap in px between the session header utilities and the corner control. */
+  headerCornerGap: number
 }
 
 /** Schema registered with the standard settings service. */
@@ -175,6 +177,7 @@ export const DesktopSettingsSchema: z<DesktopSettings> = z.object({
   networkExposure: z.union(['loopback', 'lan'] as const).default('loopback'),
   logLevel: z.union(['debug', 'info', 'warn', 'error'] as const).default('info'),
   sessionLogButton: z.boolean().default(false),
+  headerCornerGap: z.number().step(1).min(8).max(24).default(16),
 })
 
 /** Native window configuration. */

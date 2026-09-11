@@ -48,6 +48,7 @@ function shellSettings(sessionLogButton: boolean): DesktopShellSettings {
     networkExposure: 'loopback',
     logLevel: 'info',
     sessionLogButton,
+    headerCornerGap: 16,
   }
 }
 

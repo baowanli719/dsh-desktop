@@ -537,7 +537,11 @@ describe('independent Desktop frame', () => {
       // The better-sidebar panel toggle cluster drops out of the caption band
       // onto the session header's utility row, and the header yields its width.
       expect(css).toMatch(/data-dsh-desktop-platform="win32"\] \[data-slot="conversation"\] header \{\s*padding-top: 20px;\s*padding-right: 78px;\s*\}/)
-      expect(css).toMatch(/data-dsh-sidebar-collapsed\] \[data-slot="conversation"\] header \{\s*padding-right: 150px;\s*\}/)
+      // With the right panel hidden the header reserves the caption strip's
+      // measured width; the open panel's tab strip reserves it instead.
+      expect(css).toMatch(/data-dsh-desktop-platform="win32"\]:not\(:has\(\[data-sidebar-right-open\]\)\) \[data-slot="conversation"\] header \{\s*padding-right: 150px;\s*\}/)
+      expect(css).toMatch(/data-dsh-desktop-platform="win32"\] \[data-sidebar-right-panel\] \[data-dockkit-strip\] \{\s*padding-right: 144px;\s*\}/)
+      expect(css).not.toContain('data-dsh-sidebar-collapsed')
       expect(css).toMatch(/:is\(\[data-slot="conversation\.session\.header"\] > header, \[data-slot="sidebar"\] :has\(> button \[data-slot="sidebar\.brand\.mark"\]\)\) \{\s*user-select: none;\s*-webkit-app-region: drag;/)
       expect(css).toMatch(/:is\(\.dshDesktopNoDrag, button,[^{}]*\[role="tab"\][^{}]*\) \{\s*-webkit-app-region: no-drag;/)
       expect(css).toMatch(/data-dsh-desktop-platform="win32"\] \[class\*="toggleCluster"\] \{[^}]*right: calc\(var\(--dsh-sidebar-width, 0px\) \+ 10px\);[^}]*transition: right/)

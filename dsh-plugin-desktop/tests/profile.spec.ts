@@ -404,7 +404,7 @@ virtualStoreDirMaxLength: 60
     })
     expect(inserted).toContainEqual(expect.objectContaining({
       name: DESKTOP_PACKAGE_NAME,
-      config: { mode: 'compatibility', sessionLogButton: false },
+      config: { mode: 'compatibility', sessionLogButton: false, headerCornerGap: 16 },
     }))
     expect(patches).toContainEqual(expect.objectContaining({
       id: 'webserver',
@@ -796,7 +796,7 @@ virtualStoreDirMaxLength: 60
     })
     expect(rows.find(row => row.id === 'desktop-shell')).toEqual(expect.objectContaining({
       name: 'dsh-plugin-desktop',
-      config: expect.objectContaining({ mode: 'compatibility', sessionLogButton: false }),
+      config: expect.objectContaining({ mode: 'compatibility', sessionLogButton: false, headerCornerGap: 16 }),
     }))
   })
 

@@ -20,6 +20,7 @@
     "tests/client-environment.spec.ts",
     "tests/client-layout-service.spec.ts",
     "tests/client-session-log-button.spec.ts",
+    "tests/client-header-corner-gap.spec.ts",
     "tests/theme-presenter.spec.ts"
   ]
 }

@@ -24,6 +24,8 @@ export interface DesktopShellSettings {
   readonly openBrowser: boolean
   readonly networkExposure: 'loopback' | 'lan'
   readonly logLevel: 'debug' | 'info' | 'warn' | 'error'
+  /** Gap in px between the session header utilities and the corner control. */
+  readonly headerCornerGap: number
 }
 
 /** Browser view of the Host `dsh-desktop-notifications` settings namespace. */
@@ -53,7 +55,7 @@ export type DesktopSettingsSectionProps =
   & InjectFace<DesktopSettingsSectionInjected>
 
 type Translate = DesktopSettingsSectionProps['t']
-type BusyOperation = 'load' | 'create-profile' | 'select-profile' | 'delete-profile' | 'select-aa' | 'select-market' | 'mode' | 'material' | 'web' | 'notification'
+type BusyOperation = 'load' | 'create-profile' | 'select-profile' | 'delete-profile' | 'select-aa' | 'select-market' | 'mode' | 'material' | 'web' | 'notification' | 'header-gap'
 type RestartState = 'none' | 'restarting' | 'required'
 type LanPollWait = (signal: AbortSignal) => Promise<void>
 
@@ -386,6 +388,11 @@ export function DesktopSettingsSection({
     notifyOnJobCompletion: true,
     notifyOnJobFailure: true,
   }
+  // Persisted values outside the preset steps fall back to the standard gap.
+  const storedHeaderCornerGap = desktop.value?.headerCornerGap
+  const headerCornerGap = storedHeaderCornerGap === 8 || storedHeaderCornerGap === 24
+    ? storedHeaderCornerGap
+    : 16
 
   const createProfile = (event: FormEvent): void => {
     event.preventDefault()
@@ -711,6 +718,26 @@ export function DesktopSettingsSection({
             </select>
           </label>
         )}
+        <label className="dshDesktopSettingsMaterialField">
+          <span className="dshDesktopSettingsMaterialCopy">
+            <span className="dshDesktopSettingsChoiceTitle">{t('headerCornerGap')}</span>
+            <span className="dshDesktopSettingsChoiceBody">{t('headerCornerGapBody')}</span>
+          </span>
+          <select
+            className="dshDesktopSettingsSelect"
+            value={String(headerCornerGap)}
+            disabled={!settingsWritable || busy !== undefined}
+            onChange={(event) => {
+              void run('header-gap', async () => {
+                await desktopSettings.set('headerCornerGap', Number(event.currentTarget.value))
+              })
+            }}
+          >
+            <option value="8">{t('headerCornerGapCompact')}</option>
+            <option value="16">{t('headerCornerGapStandard')}</option>
+            <option value="24">{t('headerCornerGapSpacious')}</option>
+          </select>
+        </label>
       </section>
 
       <section className="dshDesktopSettingsGroup" aria-labelledby="dsh-desktop-web-title">
