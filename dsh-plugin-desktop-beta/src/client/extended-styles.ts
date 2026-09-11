@@ -1,3 +1,4 @@
+import { TASK_HEADER_STYLES } from './task-header-styles.ts'
 /** Independent frame shared by compatibility and inverted-L extended modes. */
 
 import {
@@ -415,7 +416,7 @@ export function installExtendedStyles(): () => void {
   style.id = STYLE_ID
   style.dataset.plugin = 'dsh-plugin-desktop'
   style.dataset.pluginCss = 'dsh-plugin-desktop/framed-shell'
-  style.textContent = CSS
+  style.textContent = CSS + TASK_HEADER_STYLES
   document.head.appendChild(style)
   return () => { style.remove() }
 }

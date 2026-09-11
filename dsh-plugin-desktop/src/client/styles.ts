@@ -1,3 +1,4 @@
+import { TASK_HEADER_STYLES } from './task-header-styles.ts'
 import {
   ADVANCED_MACOS_CONTENT_INSET,
   ADVANCED_MACOS_DRAG_LAYER_Z_INDEX,
@@ -31,13 +32,10 @@ body:is([data-dsh-desktop-mode="extended"], [data-dsh-desktop-mode="advanced"]) 
 .dshDesktopFrame[data-rightbar-fullscreen], .dshDesktopFrame[data-rightbar-fullscreen] .dshDesktopResizeHandle { transition: none; }
 .dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] { grid-template-rows: ${ADVANCED_WINDOWS_TITLEBAR_HEIGHT}px minmax(0, 1fr); }
 .dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] .dshDesktopSidebarSurface { grid-row: 1 / -1; }
-.dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] .dshDesktopConversationSurface { grid-row: 1 / -1; }
+.dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] .dshDesktopConversationSurface,
 .dshDesktopFrame[data-desktop-mode="advanced"][data-desktop-platform="win32"] .dshDesktopRightbarSurface { grid-row: 2; }
-/* The conversation title row now occupies the native 32px caption band. Keep
-   this grid anchor transparent and non-interactive: native caption buttons
-   remain above the page, while the real header supplies the drag region. */
-.dshDesktopWindowsCaptionRow { position: relative; grid-column: 2 / -1; grid-row: 1; min-width: 0; background: transparent; pointer-events: none; }
-.dshDesktopWindowsCaptionRow::before { display: none; }
+.dshDesktopWindowsCaptionRow { position: relative; grid-column: 2 / -1; grid-row: 1; min-width: 0; background: var(--dsw-alias-bg-base); }
+.dshDesktopWindowsCaptionRow::before { content: ""; position: absolute; inset: 0 ${WINDOWS_CAPTION_CONTROLS_WIDTH}px 0 0; user-select: none; -webkit-app-region: drag; }
 .dshDesktopFrame[data-dragging] { transition: none; }
 .dshDesktopOverlay { position: absolute; z-index: 1000; inset: 0; pointer-events: none; }
 .dshDesktopOverlay > * { pointer-events: auto; }
@@ -77,7 +75,7 @@ export function installDesktopOwnedStyles(): () => void {
   const style = document.createElement('style')
   style.dataset.plugin = 'dsh-plugin-desktop'
   style.dataset.pluginCss = 'dsh-plugin-desktop/desktop-owned-layout'
-  style.textContent = DESKTOP_OWNED_STYLES
+  style.textContent = DESKTOP_OWNED_STYLES + TASK_HEADER_STYLES
   document.head.appendChild(style)
   return () => { style.remove() }
 }

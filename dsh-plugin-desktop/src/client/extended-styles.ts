@@ -1,3 +1,4 @@
+import { TASK_HEADER_STYLES } from './task-header-styles.ts'
 /** Independent frame shared by compatibility and inverted-L extended modes. */
 
 import {
@@ -534,12 +535,57 @@ body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extende
 body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"]) [data-trigger-menu] { right: auto; width: min(280px, 100%); }
 `
 
+// Stable uses a single renderer. Paint each column through the caption band
+// and reserve its height inside the column, keeping sidebar colors continuous.
+// Beta's separate native chrome owns that reservation in its own window.
+const WINDOWS_TWO_ROW_STYLES = `
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] {
+  --dsh-desktop-frame-height: clamp(32px, var(--dsh-window-titlebar-height, 32px), 64px);
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] #root {
+  top: 0;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"]
+  [data-dsh-desktop-content-viewport] :has(> [data-shell-overlay])
+  > div:not([data-shell-overlay]):not([data-side]),
+body[data-dsh-desktop-mode="extended"][data-dsh-desktop-platform="win32"]
+  :is(.dshDesktopSidebarSurface, .dshDesktopConversationSurface, .dshDesktopRightbarSurface) {
+  box-sizing: border-box;
+  padding-top: var(--dsh-desktop-frame-height);
+}
+/* The sidebar logo row already supplies its own vertical breathing room.
+   Keep a smaller inset here without moving the conversation/right panel. */
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"]
+  [data-dsh-desktop-content-viewport] :has(> [data-shell-overlay])
+  > div:not([data-shell-overlay]):not([data-side]):has(> [data-slot="sidebar"]),
+body[data-dsh-desktop-mode="extended"][data-dsh-desktop-platform="win32"] .dshDesktopSidebarSurface {
+  padding-top: max(16px, calc(var(--dsh-desktop-frame-height) - 16px));
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] .dshDesktopFrameTitlebar {
+  left: 0;
+  width: auto;
+  height: var(--dsh-desktop-frame-height);
+  background: transparent;
+  pointer-events: auto;
+  -webkit-app-region: drag;
+}
+body[data-dsh-desktop-mode="extended"][data-dsh-desktop-platform="win32"] .dshDesktopDetailsSurface {
+  padding-top: 0;
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [data-shell-overlay] {
+  top: var(--dsh-desktop-frame-height);
+}
+body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [data-sidebar-right-panel] [data-dockkit-strip] {
+  padding-right: 6px;
+}
+`
+
 export function installExtendedStyles(): () => void {
   const style = document.createElement('style')
   style.id = STYLE_ID
   style.dataset.plugin = 'dsh-plugin-desktop'
   style.dataset.pluginCss = 'dsh-plugin-desktop/framed-shell'
-  style.textContent = CSS
+  style.textContent = CSS + WINDOWS_TWO_ROW_STYLES + TASK_HEADER_STYLES
   document.head.appendChild(style)
   return () => { style.remove() }
 }
