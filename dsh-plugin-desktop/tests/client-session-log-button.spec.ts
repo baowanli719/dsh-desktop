@@ -103,7 +103,7 @@ describe('applySessionLogButtonVisibility', () => {
 
 describe('session-log export client patch', () => {
   const exportPatch = readFileSync(new URL(
-    '../../patches/dsh-session-log-export@0.1.2-rc.1.patch',
+    '../../patches/dsh-session-log-export@0.1.5-rc.1.patch',
     import.meta.url,
   ), 'utf8')
 

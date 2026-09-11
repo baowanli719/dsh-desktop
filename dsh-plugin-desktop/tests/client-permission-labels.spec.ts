@@ -36,11 +36,11 @@ describe('installDesktopPermissionLabels', () => {
 
 describe('permission-label client patches', () => {
   const conversationPatch = readFileSync(new URL(
-    '../../patches/dsh-client-ui-conversation@0.1.2-rc.1.patch',
+    '../../patches/dsh-client-ui-conversation@0.1.5-rc.1.patch',
     import.meta.url,
   ), 'utf8')
   const presetsPatch = readFileSync(new URL(
-    '../../patches/dsh-client-ui-permission-presets@0.1.2-rc.1.patch',
+    '../../patches/dsh-client-ui-permission-presets@0.1.5-rc.1.patch',
     import.meta.url,
   ), 'utf8')
 

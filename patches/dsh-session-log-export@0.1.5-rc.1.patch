@@ -1,0 +1,11 @@
+diff --git a/lib/client.js b/lib/client.js
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -211,6 +211,7 @@
+ 				anchor: (0, react_jsx_runtime.jsx)("button", {
+ 					type: "button",
+ 					className: HeaderAction_module_css_default.moreButton,
++					"data-dsh-session-log-download": "action",
+ 					"aria-label": t("header.more"),
+ 					"aria-haspopup": "menu",
+ 					"aria-expanded": open,

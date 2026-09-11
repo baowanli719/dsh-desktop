@@ -1,16 +1,16 @@
 diff --git a/lib/client.js b/lib/client.js
 --- a/lib/client.js
 +++ b/lib/client.js
-@@ -479,6 +479,8 @@
- 			for (const score of previous) best = Math.max(best, score);
- 			return best === noMatch ? void 0 : best;
- 		}
+@@ -490,6 +490,8 @@
+ 			["permission", "description.permission"],
+ 			["plan", "description.plan"]
+ 		]);
 +		/** Query prefix marking the drilled commands submenu (desktop collapse). */
 +		const COMMANDS_MENU_PREFIX = "指令/";
- 		/** Case-insensitive fuzzy filtering with stable ordering for equal matches. */
- 		function fuzzyCandidates(candidates, rawQuery) {
- 			const query = rawQuery.toLowerCase();
-@@ -533,8 +535,10 @@
+ 		/** Command surface: session-keyed directory + '/' source + contribution registry + per-session popups. */
+ 		var CommandUiRuntime = class extends _deepseek_ai_cordis.Service {
+ 			static inject = [
+@@ -526,8 +528,10 @@
  				ctx.effect(() => inputTriggers.registerSource({
  					trigger: "/",
  					name: "command",
@@ -21,9 +21,9 @@ diff --git a/lib/client.js b/lib/client.js
  					matchSpace: (session, token) => this.matchSpace(session, token),
  					matchEnter: (session, line, signal, envelope) => this.matchEnter(session, line, signal, envelope),
  					warm: (session) => {
-@@ -639,6 +643,14 @@
+@@ -632,6 +636,14 @@
  			}
- 			/** Menu candidates: host catalog + contribution availability, then position filtering and fuzzy name ranking. */
+ 			/** Menu candidates: host catalog + contribution availability, then position filtering and the shared name ranking. */
  			async candidates(session, req) {
 +				if (req.query === "") return [{
 +					name: "指令",
@@ -36,12 +36,12 @@ diff --git a/lib/client.js b/lib/client.js
  				const list = await this.directory.ensureReady(session.sessionId, req.signal);
  				const rows = [];
  				const seen = /* @__PURE__ */ new Set();
-@@ -658,10 +670,20 @@
- 						description: contribution.description
+@@ -651,7 +663,15 @@
+ 						description: contribution.description()
  					});
  				}
--				return fuzzyCandidates(rows.filter((c) => req.position === "leading" || c.hint === void 0), req.query);
-+				return fuzzyCandidates(rows.filter((c) => req.position === "leading" || c.hint === void 0), query);
+-				return (0, _deepseek_ai_dsh_client_ui_primitives.rankByName)(rows.filter((c) => req.position === "leading" || c.hint === void 0), req.query);
++				return (0, _deepseek_ai_dsh_client_ui_primitives.rankByName)(rows.filter((c) => req.position === "leading" || c.hint === void 0), query);
 +			}
 +			/** Breadcrumb for the drilled commands submenu (desktop collapse). */
 +			header(session, req) {
@@ -51,7 +51,11 @@ diff --git a/lib/client.js b/lib/client.js
 +					{ label: "指令", value: "commands", current: true }
 +				];
  			}
- 			/** Decision table, menu column: contribution/decorated-host → popup; host input → claim; host bare → detached execute. */
+ 			/** Translate exact built-in Host copy while preserving scoped or third-party descriptors verbatim. */
+ 			hostDescription(command) {
+@@ -660,6 +680,8 @@
+ 			}
+ 			/** Decision table, menu column: contribution/decorated-host → popup or action; host input → claim; host bare → detached execute. */
  			dispatch(pick) {
 +				if (pick.candidate.value === "commands") return { text: `/${COMMANDS_MENU_PREFIX}`, continue: true };
 +				if (pick.candidate.value === "root") return { text: "/", continue: true };
