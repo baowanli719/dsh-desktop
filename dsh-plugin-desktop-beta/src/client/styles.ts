@@ -1,3 +1,4 @@
+import { TASK_HEADER_STYLES } from './task-header-styles.ts'
 import {
   ADVANCED_MACOS_CONTENT_INSET,
   ADVANCED_MACOS_DRAG_LAYER_Z_INDEX,
@@ -54,7 +55,7 @@ export function installDesktopOwnedStyles(): () => void {
   const style = document.createElement('style')
   style.dataset.plugin = 'dsh-plugin-desktop'
   style.dataset.pluginCss = 'dsh-plugin-desktop/desktop-owned-layout'
-  style.textContent = DESKTOP_OWNED_STYLES
+  style.textContent = DESKTOP_OWNED_STYLES + TASK_HEADER_STYLES
   document.head.appendChild(style)
   return () => { style.remove() }
 }

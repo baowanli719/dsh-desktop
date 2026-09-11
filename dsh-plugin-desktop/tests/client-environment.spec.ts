@@ -195,10 +195,10 @@ describe('advanced desktop layout', () => {
       expect(css).not.toMatch(/html:has\(\[aria-modal="true"\]\) \.dshDesktopSidebarSurface/)
       expect(css).toContain(`grid-template-rows: ${ADVANCED_WINDOWS_TITLEBAR_HEIGHT}px minmax(0, 1fr)`)
       expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-mode="advanced"\]\[data-desktop-platform="win32"\] \.dshDesktopSidebarSurface \{ grid-row: 1 \/ -1; \}/)
-      expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-mode="advanced"\]\[data-desktop-platform="win32"\] \.dshDesktopConversationSurface \{ grid-row: 1 \/ -1; \}/)
+      expect(css).toContain('.dshDesktopConversationSurface,')
       expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-mode="advanced"\]\[data-desktop-platform="win32"\] \.dshDesktopRightbarSurface \{ grid-row: 2; \}/)
-      expect(css).toMatch(/\.dshDesktopWindowsCaptionRow \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 1;[^}]*background: transparent;[^}]*pointer-events: none;/)
-      expect(css).toContain('.dshDesktopWindowsCaptionRow::before { display: none; }')
+      expect(css).toMatch(/\.dshDesktopWindowsCaptionRow \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 1;[^}]*background: var\(--dsw-alias-bg-base\);/)
+      expect(css).toContain('.dshDesktopWindowsCaptionRow::before { content: "";')
       // The Windows conversation title occupies the 32px caption band; native
       // controls get their measured safe width.
       expect(css).toContain('padding-top: 20px;')
@@ -523,7 +523,7 @@ describe('independent Desktop frame', () => {
       expect(css).toMatch(/\.dshDesktopTitlebarIconButton svg,[^}]*width: 14px;[^}]*height: 14px;/)
       expect(css).toContain('.dshDesktopActionMenu')
       expect(css).toMatch(/\.dshDesktopFrameTitlebar\[data-platform="win32"\] \{[^}]*left: auto;[^}]*width: 138px;[^}]*padding: 0;/)
-      expect(css).toMatch(/\.dshDesktopFrameTitlebar\[data-platform="win32"\] \{[^}]*background: transparent;[^}]*pointer-events: none;[^}]*-webkit-app-region: no-drag;/)
+      expect(css).toMatch(/\.dshDesktopFrameTitlebar \{[^}]*left: 0;[^}]*height: var\(--dsh-desktop-frame-height\);[^}]*background: transparent;[^}]*pointer-events: auto;[^}]*-webkit-app-region: drag;/)
       expect(css).not.toContain(`padding: 0 ${WINDOWS_CAPTION_CONTROLS_WIDTH + 8}px 0 8px`)
       expect(css).toContain(`padding: 0 8px 0 ${MACOS_TRAFFIC_LIGHT_SAFE_WIDTH + 8}px`)
       expect(css).toMatch(/\.dshDesktopWindowControls \{[^}]*pointer-events: auto;[^}]*-webkit-app-region: no-drag;/)

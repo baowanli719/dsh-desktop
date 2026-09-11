@@ -207,7 +207,7 @@ describe('advanced desktop layout', () => {
       expect(css).toMatch(new RegExp(`\\.dshDesktopMacCaptionRow \\{[^}]*position: absolute;[^}]*z-index: ${ADVANCED_MACOS_DRAG_LAYER_Z_INDEX};[^}]*grid-column: 2 / -1;[^}]*grid-row: 1;[^}]*left: 0;[^}]*height: ${ADVANCED_MACOS_DRAG_REGION_HEIGHT}px;[^}]*background: var\\(--dsw-alias-bg-base\\);[^}]*-webkit-app-region: drag;`))
       expect(css).not.toContain('.dshDesktopMacCaptionRow::before')
       expect(css).not.toMatch(/data-desktop-platform="darwin"\] \.dshDesktopSidebarSurface \{[^}]*-webkit-app-region:\s*drag;/)
-      expect(css).not.toContain('[data-slot="conversation.session.header"]')
+      expect(css).toContain('[data-slot="conversation.session.header"] > header:not([aria-hidden="true"])')
       expect(css).not.toContain('[data-phase')
       expect(css).toMatch(/\.dshDesktopNoDrag, button, input, textarea, select, label, summary, a,[^{}]*\{ -webkit-app-region: no-drag !important; \}/)
       expect(css).toContain('[contenteditable="true"]')
