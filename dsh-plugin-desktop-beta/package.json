@@ -410,7 +410,6 @@
     },
     "nsis": {
       "include": "installer.nsh",
-      "license": "THIRD_PARTY_NOTICES.md",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": true,

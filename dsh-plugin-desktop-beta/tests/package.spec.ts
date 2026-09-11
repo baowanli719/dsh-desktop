@@ -905,7 +905,6 @@ describe('published package surface', () => {
     expect(manifest.build?.win?.artifactName).toBe('DSH-Desktop-Beta-${version}-${arch}-Portable.${ext}')
     expect(manifest.build?.nsis).toEqual({
       include: 'installer.nsh',
-      license: 'THIRD_PARTY_NOTICES.md',
       oneClick: false,
       perMachine: false,
       allowElevation: true,
