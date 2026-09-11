@@ -16,8 +16,6 @@ interface ClientRegistration {
 }
 
 const clientPlugins = [
-  'dsh-better-sidebar',
-  '@huanlin/dsh-plugin-better-sidebar-plugin-office',
   'dsh-vision-router',
 ] as const
 
@@ -62,11 +60,6 @@ describe('stable Renderer client plugin bundles', () => {
         `${name} requires ${peer}@${range}, received ${String(peerManifest.version)}`,
       ).toBe(true)
     }
-  })
-
-  it('pins the compatible sidebar/Office pair used by Harness 0.1.2-rc.1', () => {
-    expect(packageJson('dsh-better-sidebar').version).toBe('0.17.1')
-    expect(packageJson('@huanlin/dsh-plugin-better-sidebar-plugin-office').version).toBe('0.2.0')
   })
 
   it('pins the yarn-patched vision router build', () => {

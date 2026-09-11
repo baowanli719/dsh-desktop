@@ -200,15 +200,13 @@ describe('advanced desktop layout', () => {
       expect(css).toMatch(/\.dshDesktopWindowsCaptionRow \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 1;[^}]*background: transparent;[^}]*pointer-events: none;/)
       expect(css).toContain('.dshDesktopWindowsCaptionRow::before { display: none; }')
       // The Windows conversation title occupies the 32px caption band; native
-      // controls get their measured safe width and better-sidebar starts below.
+      // controls get their measured safe width.
       expect(css).toContain('padding-top: 20px;')
       expect(css).toContain('padding-right: 78px;')
       expect(css).toContain(`padding-right: ${WINDOWS_CAPTION_CONTROLS_WIDTH + 12}px;`)
       expect(css).toMatch(/:is\(\[data-slot="conversation\.session\.header"\] > header, \[data-slot="sidebar"\] :has\(> button \[data-slot="sidebar\.brand\.mark"\]\)\) \{\s*user-select: none;\s*-webkit-app-region: drag;/)
-      expect(css).toMatch(/data-dsh-desktop-mode="advanced"\]\[data-dsh-desktop-platform="win32"\] \[class\*="toggleCluster"\] \{[^}]*right: calc\(var\(--dsh-sidebar-width, 0px\) \+ 10px\);[^}]*transition: right/)
-      expect(css).toContain('[data-dsh-sidebar-dragging] [class*="toggleCluster"] { transition: none; }')
+      expect(css).not.toContain('toggleCluster')
       expect(css).toContain('body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="darwin"] [data-slot="conversation"] header { padding-top: 4px; padding-right: 98px; }')
-      expect(css).toContain('body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="darwin"] [class*="toggleCluster"] { top: 26px; }')
       expect(appendChild).toHaveBeenCalledWith(style)
       dispose()
       expect(remove).toHaveBeenCalledOnce()
@@ -534,18 +532,16 @@ describe('independent Desktop frame', () => {
       expect(css).toMatch(/body\[data-dsh-desktop-mode="compatibility"\] \{[^}]*--dsh-desktop-frame-fill: var\(--dsw-alias-bg-base\);/)
       expect(css).toMatch(/body\[data-dsh-desktop-mode="extended"\]\[data-dsh-desktop-material="off"\] \{[^}]*--dsh-desktop-frame-fill: var\(--dsw-alias-bg-layer-1\);/)
       expect(css).not.toContain('var(--dsw-alias-bg-base) 54%')
-      // The better-sidebar panel toggle cluster drops out of the caption band
-      // onto the session header's utility row, and the header yields its width.
+      // The Windows session header reserves the native caption controls'
+      // measured safe width while the right panel is hidden, and the open
+      // panel's tab strip reserves the same width for its own chrome buttons.
       expect(css).toMatch(/data-dsh-desktop-platform="win32"\] \[data-slot="conversation"\] header \{\s*padding-top: 20px;\s*padding-right: 78px;\s*\}/)
-      // With the right panel hidden the header reserves the caption strip's
-      // measured width; the open panel's tab strip reserves it instead.
       expect(css).toMatch(/data-dsh-desktop-platform="win32"\]:not\(:has\(\[data-sidebar-right-open\]\)\) \[data-slot="conversation"\] header \{\s*padding-right: 150px;\s*\}/)
       expect(css).toMatch(/data-dsh-desktop-platform="win32"\] \[data-sidebar-right-panel\] \[data-dockkit-strip\] \{\s*padding-right: 144px;\s*\}/)
       expect(css).not.toContain('data-dsh-sidebar-collapsed')
       expect(css).toMatch(/:is\(\[data-slot="conversation\.session\.header"\] > header, \[data-slot="sidebar"\] :has\(> button \[data-slot="sidebar\.brand\.mark"\]\)\) \{\s*user-select: none;\s*-webkit-app-region: drag;/)
       expect(css).toMatch(/:is\(\.dshDesktopNoDrag, button,[^{}]*\[role="tab"\][^{}]*\) \{\s*-webkit-app-region: no-drag;/)
-      expect(css).toMatch(/data-dsh-desktop-platform="win32"\] \[class\*="toggleCluster"\] \{[^}]*right: calc\(var\(--dsh-sidebar-width, 0px\) \+ 10px\);[^}]*transition: right/)
-      expect(css).toMatch(/data-dsh-desktop-platform="darwin"\] \[class\*="toggleCluster"\] \{\s*top: 42px;\s*\}/)
+      expect(css).not.toContain('toggleCluster')
       // The Windows caption band compresses to 28px and every consumer of the
       // frame-height var follows; the titlebar element carries a literal height.
       expect(css).toMatch(/\[data-dsh-desktop-platform="win32"\] \{\s*--dsh-desktop-frame-height: 28px;\s*\}/)

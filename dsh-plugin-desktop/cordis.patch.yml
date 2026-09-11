@@ -33,10 +33,6 @@
     # joins every agent assembly, including preset agents.
     - id: desktop-prompt-language
       name: dsh-plugin-desktop/prompt-language
-    # Default-enabled third-party sidebar workbench (files/terminal/Git/
-    # sub-agents). No config key: the plugin's own defaults apply.
-    - id: better-sidebar
-      name: 'dsh-better-sidebar'
     # Community vision bridge: pasted images become ordinary vision-tool turns
     # through the server-side vision model. The row id matches the plugin's own
     # bundle patch so a manual `dsh plugin add` cannot double-mount it. The
@@ -59,13 +55,6 @@
         updateCheck: false
         downscaleMaxPixels: 2000000
         maxImageBodyBytes: 2800000
-    # Office-suite preview viewers (.docx/.xlsx/.pptx) for the better-sidebar
-    # editor; the client-only plugin registers them through the sidebar's
-    # file-viewer service. The row id matches the plugin's own bundle patch so
-    # a manual `dsh plugin add` cannot double-mount it. AGPL-3.0: internal
-    # distribution only, see THIRD_PARTY_NOTICES.md.
-    - id: dsh-better-sidebar-plugin-office
-      name: '@huanlin/dsh-plugin-better-sidebar-plugin-office'
 
 # Local skill discovery is banned in the desktop product: skills arrive from
 # gsclaw-server alone (server-skill-provider above). This row is the first

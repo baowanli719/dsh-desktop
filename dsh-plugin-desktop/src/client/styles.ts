@@ -59,16 +59,7 @@ body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"]
   user-select: none;
   -webkit-app-region: drag;
 }
-/* better-sidebar owns its toggle cluster coordinates. Its title-bar
-   compatibility preset follows the measured native inset; Desktop only
-   anchors the cluster to the moving conversation edge. */
-body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"] [class*="toggleCluster"] {
-  right: calc(var(--dsh-sidebar-width, 0px) + 10px);
-  transition: right var(--ds-transition-duration-slow) var(--ds-ease-in-out);
-}
-body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="win32"][data-dsh-sidebar-dragging] [class*="toggleCluster"] { transition: none; }
 body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="darwin"] [data-slot="conversation"] header { padding-top: 4px; padding-right: 98px; }
-body[data-dsh-desktop-mode="advanced"][data-dsh-desktop-platform="darwin"] [class*="toggleCluster"] { top: 26px; }
 @media (prefers-reduced-motion: reduce) {
   .dshDesktopFrame,
   .dshDesktopResizeHandle { transition: none !important; }

@@ -877,10 +877,6 @@ describe('published package surface', () => {
       'THIRD_PARTY_NOTICES.md',
       '!node_modules/node-pty/build/**',
       '!node_modules/fs-ext/build/**',
-      // The unlicensed Univer Pro packages ride along as @univerjs/presets
-      // dependencies but stay out of the installer (verify-licenses.mjs
-      // NOT_SHIPPED_PREFIXES).
-      '!node_modules/@univerjs-pro/**',
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
     expect(manifest.build?.mac?.mergeASARs).toBe(false)
@@ -1172,11 +1168,12 @@ describe('published package surface', () => {
     expect(lockfile).not.toContain('@koromix/koffi-win32-x64@npm:3.1.4')
   })
 
-  it('hides official plugin-manager and general subprocess consoles on Windows', () => {
+  it('hides official plugin-manager and general subprocess consoles on Windows and runs the Job runner in Electron Node mode', () => {
     const dshPatchPath = './patches/dsh@0.1.5-rc.1.patch'
-    const retiredSubprocessPatchPath = './patches/dsh-subprocess-local@0.1.5-rc.1.patch'
+    const subprocessPatchPath = './patches/dsh-subprocess-local@0.1.5-rc.1.patch'
     const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
     const dshPatch = readFileSync(new URL(dshPatchPath, workspaceRoot), 'utf8')
+    const subprocessPatch = readFileSync(new URL(subprocessPatchPath, workspaceRoot), 'utf8')
     const workspaceRequire = createRequire(new URL('package.json', packageRoot))
     const dshManifest = workspaceRequire.resolve('@deepseek-ai/dsh/package.json')
     const dshBin = readFileSync(join(dirname(dshManifest), 'lib/bin.js'), 'utf8')
@@ -1192,9 +1189,10 @@ describe('published package surface', () => {
     const subprocessRuntime = readFileSync(join(dirname(subprocessManifest), 'lib', runnerEntry), 'utf8')
 
     expect(dshResolution('@deepseek-ai/dsh')).toContain(dshPatchPath)
-    expect(dshResolution('@deepseek-ai/dsh-subprocess-local')).not.toContain('patch:')
+    expect(dshResolution('@deepseek-ai/dsh-subprocess-local')).toContain(subprocessPatchPath)
     expect(lockfile).toContain(dshPatchPath)
-    expect(lockfile).not.toContain(retiredSubprocessPatchPath)
+    expect(lockfile).toContain(subprocessPatchPath)
+    expect(subprocessPatch).toContain('env.ELECTRON_RUN_AS_NODE = "1"')
     expect(dshPatch).toContain('+\t\twindowsHide: true')
     expect(dshPluginRuntime).toMatch(/spawnSync\("pnpm"[\s\S]*?shell: process\.platform === "win32",\s+windowsHide: true/u)
     let spawnCalls = 0
@@ -1219,6 +1217,7 @@ describe('published package surface', () => {
     expect(exitCode).toBe(17)
     expect(subprocessRuntime.match(/windowsHide: true/gu)).toHaveLength(2)
     expect(subprocessRuntime).toContain('windowsHide: platform === "win32"')
+    expect(subprocessRuntime).toContain('env.ELECTRON_RUN_AS_NODE = "1"')
   })
 
   it('resolves electron-builder through the pinned app-builder-lib keychain patch', () => {

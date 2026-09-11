@@ -494,12 +494,6 @@ body[data-dsh-desktop-mode="extended"]:not([data-dsh-desktop-material="off"]) {
   font-size: 11px;
   line-height: 1.4;
 }
-/* better-sidebar pins its panel toggle cluster to the viewport's top-right
-   corner — inside the Desktop caption band, where the fixed titlebar layer
-   swallows its clicks. Drop the cluster onto the session header's utility
-   row (frame height + 4px header padding + 2px centering against the 32px
-   pill) and reserve its width in the header's right padding so the utility
-   content yields to it. */
 body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [data-slot="conversation"] header {
   padding-top: 20px;
   padding-right: 78px;
@@ -528,19 +522,9 @@ body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extende
   :is(.dshDesktopNoDrag, button, a, input, textarea, select, label, summary, [contenteditable="true"], [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="menuitem"], [role="option"], [role="dialog"]) {
   -webkit-app-region: no-drag;
 }
-body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"] [class*="toggleCluster"] {
-  right: calc(var(--dsh-sidebar-width, 0px) + 10px);
-  transition: right var(--ds-transition-duration-slow) var(--ds-ease-in-out);
-}
-body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="win32"][data-dsh-sidebar-dragging] [class*="toggleCluster"] {
-  transition: none;
-}
 body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="darwin"] [data-slot="conversation"] header {
   padding-top: 4px;
   padding-right: 98px;
-}
-body:is([data-dsh-desktop-mode="compatibility"], [data-dsh-desktop-mode="extended"])[data-dsh-desktop-platform="darwin"] [class*="toggleCluster"] {
-  top: 42px;
 }
 /* Slash/plus trigger menu: upstream pins both edges to the composer card
    (712-952px on wide windows). Keep the left edge flush and cap the width.
